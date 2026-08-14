@@ -95,13 +95,14 @@ def style_status(val):
 
 
 # -------------------------------------------------------------
-# 2. เชื่อมต่อ Supabase
+# 2. เชื่อมต่อ Supabase และกำหนดชื่อหน้าเว็บ
 # -------------------------------------------------------------
 st.set_page_config(
-    page_title="ระบบแจ้งซ่อมและบันทึกผลงาน", page_icon="🛠️", layout="wide"
+    page_title="ใบแจ้งซ่อม-บันทึกการซ่อม", page_icon="🛠️", layout="wide"
 )
 
-st.title("🛠️ ระบบแจ้งซ่อม บันทึกผลงาน (Supabase Cloud Database)")
+# หัวกระดาษหลักของแอป
+st.title("🛠️ ใบแจ้งซ่อม-บันทึกการซ่อม")
 
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
@@ -154,6 +155,18 @@ def load_data():
 
 df_data = load_data()
 
+# ดึงรายการแผนกทั้งหมดที่มีอยู่ในฐานข้อมูลมารวมกับแผนกเริ่มต้น
+default_depts = ["สีฝุ่น", "สีน้ำมัน", "โซน 2"]
+if not df_data.empty and "department" in df_data.columns:
+  db_depts = [
+      str(d).strip()
+      for d in df_data["department"].dropna().unique()
+      if str(d).strip() != ""
+  ]
+  all_departments = sorted(list(set(default_depts + db_depts)))
+else:
+  all_departments = default_depts
+
 tab1, tab2, tab3 = st.tabs([
     "📝 ส่งใบแจ้งซ่อม",
     "⚙️ จัดการ/แก้ไขงานซ่อม (สำหรับช่าง)",
@@ -167,12 +180,18 @@ with tab1:
   st.subheader("กรอกข้อมูลการแจ้งซ่อมใหม่")
   with st.form(key="repair_form", clear_on_submit=True):
     col1, col2, col3 = st.columns(3)
+
     with col1:
       reporter = st.text_input("ชื่อผู้แจ้ง *")
+
     with col2:
-      department = st.selectbox(
-          "เลือกแผนก / โซน *", ["สีฝุ่น", "สีน้ำมัน", "โซน 2"]
-      )
+      dept_options = all_departments + ["➕ พิมพ์ระบุแผนกใหม่..."]
+      dept_choice = st.selectbox("เลือกแผนก / โซน *", dept_options)
+      if dept_choice == "➕ พิมพ์ระบุแผนกใหม่...":
+        department = st.text_input("พิมพ์ชื่อแผนก / โซน ใหม่ *")
+      else:
+        department = dept_choice
+
     with col3:
       priority = st.selectbox(
           "ระดับความเร่งด่วน", ["ปกติ", "ด่วน", "ด่วนที่สุด"]
@@ -209,7 +228,7 @@ with tab1:
 
         new_data = {
             "reporter": reporter,
-            "department": department,
+            "department": department.strip(),
             "equipment": equipment,
             "description": description,
             "priority": priority,
@@ -317,11 +336,17 @@ with tab2:
       st.markdown("#### 1️⃣ ข้อมูลการแจ้งซ่อม (ฝั่งผู้แจ้ง)")
       col_e1, col_e2, col_e3 = st.columns(3)
 
-      dept_options = ["สีฝุ่น", "สีน้ำมัน", "โซน 2"]
-      curr_dept = (
-          ticket["department"]
-          if ticket["department"] in dept_options
-          else dept_options[0]
+      # จัดการตัวเลือกแผนกสำหรับหน้าแก้ไข
+      curr_ticket_dept = str(ticket["department"] or "").strip()
+      edit_dept_base = sorted(list(set(all_departments + [curr_ticket_dept])))
+      if "" in edit_dept_base:
+        edit_dept_base.remove("")
+      edit_dept_options = edit_dept_base + ["➕ พิมพ์ระบุแผนกใหม่..."]
+
+      curr_dept_idx = (
+          edit_dept_options.index(curr_ticket_dept)
+          if curr_ticket_dept in edit_dept_options
+          else 0
       )
 
       prio_options = ["ปกติ", "ด่วน", "ด่วนที่สุด"]
@@ -335,12 +360,18 @@ with tab2:
         reporter_edit = st.text_input(
             "ผู้แจ้งซ่อม", value=str(ticket["reporter"] or "")
         )
+
       with col_e2:
-        department_edit = st.selectbox(
-            "แผนก / โซน",
-            dept_options,
-            index=dept_options.index(curr_dept),
+        dept_choice_edit = st.selectbox(
+            "แผนก / โซน", edit_dept_options, index=curr_dept_idx
         )
+        if dept_choice_edit == "➕ พิมพ์ระบุแผนกใหม่...":
+          department_edit = st.text_input(
+              "พิมพ์ชื่อแผนก / โซน ใหม่", value=curr_ticket_dept
+          )
+        else:
+          department_edit = dept_choice_edit
+
       with col_e3:
         priority_edit = st.selectbox(
             "ระดับความเร่งด่วน",
@@ -486,7 +517,7 @@ with tab2:
 
         update_data = {
             "reporter": reporter_edit,
-            "department": department_edit,
+            "department": department_edit.strip(),
             "equipment": equipment_edit,
             "description": description_edit,
             "priority": priority_edit,
