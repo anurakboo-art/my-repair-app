@@ -1,24 +1,23 @@
+import base64
 import io
-import sqlite3
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 from PIL import Image
 import plotly.express as px
 import streamlit as st
+from supabase import create_client
 
 # -------------------------------------------------------------
-# กำหนดเขตเวลาประเทศไทย (UTC+7 / ICT)
+# 1. กำหนดเขตเวลาประเทศไทย (UTC+7)
 # -------------------------------------------------------------
 THAILAND_TZ = timezone(timedelta(hours=7))
 
 
 def get_thailand_now_dt():
-  """ฟังก์ชันดึง datetime Object ปัจจุบันของไทย"""
   return datetime.now(THAILAND_TZ)
 
 
 def format_timedelta(td):
-  """ฟังก์ชันแปลง Timedelta ให้แสดงผลเป็น วัน/ชม./นาที"""
   if pd.isna(td) or td is None:
     return "-"
   total_seconds = int(td.total_seconds())
@@ -40,51 +39,102 @@ def format_timedelta(td):
   return " ".join(parts)
 
 
+def compress_and_to_base64(image_bytes, max_size=(400, 400), quality=60):
+  if not image_bytes:
+    return ""
+  try:
+    img = Image.open(io.BytesIO(image_bytes))
+    if img.mode in ("RGBA", "P"):
+      img = img.convert("RGB")
+    img.thumbnail(max_size)
+    out_buf = io.BytesIO()
+    img.save(out_buf, format="JPEG", quality=quality)
+    return base64.b64encode(out_buf.getvalue()).decode("utf-8")
+  except Exception:
+    return ""
+
+
+def base64_to_image(b64_str):
+  if not b64_str or pd.isna(b64_str) or str(b64_str).strip() == "":
+    return None
+  try:
+    img_bytes = base64.b64decode(str(b64_str))
+    return Image.open(io.BytesIO(img_bytes))
+  except Exception:
+    return None
+
+
 def style_status(val):
-  """ฟังก์ชันใส่สีพื้นหลังให้ช่องสถานะ"""
   if val == "เสร็จสิ้น":
-    return "background-color: #d4edda; color: #155724; font-weight: bold;"  # สีเขียว
+    return "background-color: #d4edda; color: #155724; font-weight: bold;"
   elif val == "รอดำเนินการ":
-    return "background-color: #fff3cd; color: #856404; font-weight: bold;"  # สีเหลือง
+    return "background-color: #fff3cd; color: #856404; font-weight: bold;"
   elif val == "ยกเลิก":
-    return "background-color: #f8d7da; color: #721c24; font-weight: bold;"  # สีแดง
+    return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
   elif val == "กำลังดำเนินการ":
-    return "background-color: #cce5ff; color: #004085; font-weight: bold;"  # สีฟ้า
+    return "background-color: #cce5ff; color: #004085; font-weight: bold;"
   return ""
 
 
-# --- 1. ตั้งค่าฐานข้อมูล SQLite ---
-conn = sqlite3.connect("repair_system_v6.db", check_same_thread=False)
-c = conn.cursor()
-
-c.execute("""
-CREATE TABLE IF NOT EXISTS repair_tickets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    reporter TEXT NOT NULL,
-    department TEXT NOT NULL,
-    equipment TEXT NOT NULL,
-    description TEXT NOT NULL,
-    priority TEXT NOT NULL,
-    status TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    image BLOB,
-    technician TEXT,
-    cause TEXT,
-    solution TEXT,
-    parts_used TEXT,
-    parts_qty TEXT,
-    completed_at TEXT,
-    image_after BLOB
-)
-""")
-conn.commit()
-
-# --- 2. ตั้งค่าหน้าตาแอป Streamlit ---
+# -------------------------------------------------------------
+# 2. เชื่อมต่อ Supabase
+# -------------------------------------------------------------
 st.set_page_config(
     page_title="ระบบแจ้งซ่อมและบันทึกผลงาน", page_icon="🛠️", layout="wide"
 )
 
-st.title("🛠️ ระบบแจ้งซ่อม บันทึกผลงาน และรายงานสถิติ")
+st.title("🛠️ ระบบแจ้งซ่อม บันทึกผลงาน (Supabase Cloud Database)")
+
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase = create_client(url, key)
+
+COLUMN_NAMES = [
+    "id",
+    "reporter",
+    "department",
+    "equipment",
+    "description",
+    "priority",
+    "status",
+    "report_date",
+    "report_time",
+    "created_at",
+    "image_before",
+    "technician",
+    "cause",
+    "solution",
+    "parts_used",
+    "parts_qty",
+    "completed_date",
+    "completed_time",
+    "completed_at",
+    "image_after",
+]
+
+
+def load_data():
+  try:
+    response = (
+        supabase.table("repair_requests")
+        .select("*")
+        .order("id", desc=False)
+        .execute()
+    )
+    data = response.data
+    if not data:
+      return pd.DataFrame(columns=COLUMN_NAMES)
+    df = pd.DataFrame(data)
+    for col in COLUMN_NAMES:
+      if col not in df.columns:
+        df[col] = ""
+    return df
+  except Exception as e:
+    st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูล: {e}")
+    return pd.DataFrame(columns=COLUMN_NAMES)
+
+
+df_data = load_data()
 
 tab1, tab2, tab3 = st.tabs([
     "📝 ส่งใบแจ้งซ่อม",
@@ -93,7 +143,7 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 # ==========================================
-# --- Tab 1: ฟอร์มแจ้งซ่อม (ฝั่งผู้ใช้งาน) ---
+# --- Tab 1: ฟอร์มแจ้งซ่อม ---
 # ==========================================
 with tab1:
   st.subheader("กรอกข้อมูลการแจ้งซ่อม")
@@ -131,92 +181,71 @@ with tab1:
 
     if submit_button:
       if reporter and department and equipment and description:
-        image_bytes = None
+        image_b64 = ""
         if uploaded_file is not None:
-          image_bytes = uploaded_file.read()
+          image_b64 = compress_and_to_base64(uploaded_file.read())
 
-        # รวมวันที่และเวลาแจ้งซ่อมเข้าด้วยกัน
         created_at_str = (
-            f"{report_date} {report_time.strftime('%H:%M:%S')}"
+            f"{report_date} {report_time.strftime('%H:%M:%S')}+07:00"
         )
 
-        c.execute(
-            """
-                    INSERT INTO repair_tickets (reporter, department, equipment, description, priority, status, created_at, image)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-            (
-                reporter,
-                department,
-                equipment,
-                description,
-                priority,
-                "รอดำเนินการ",
-                created_at_str,
-                image_bytes,
-            ),
-        )
-        conn.commit()
+        new_data = {
+            "reporter": reporter,
+            "department": department,
+            "equipment": equipment,
+            "description": description,
+            "priority": priority,
+            "status": "รอดำเนินการ",
+            "report_date": str(report_date),
+            "report_time": report_time.strftime("%H:%M:%S"),
+            "created_at": created_at_str,
+            "image_before": image_b64,
+            "technician": "",
+            "cause": "",
+            "solution": "",
+            "parts_used": "",
+            "parts_qty": "",
+            "completed_date": None,
+            "completed_time": None,
+            "completed_at": None,
+            "image_after": "",
+        }
+
+        res = supabase.table("repair_requests").insert(new_data).execute()
         st.success("✅ ส่งข้อมูลแจ้งซ่อมเรียบร้อยแล้ว!")
+        st.rerun()
       else:
         st.warning("⚠️ กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบถ้วน")
 
-# ==========================================================
-# --- Tab 2: บันทึกงานซ่อม & แนบรูปหลังซ่อม (ฝั่งช่าง) ---
-# ==========================================================
+# ==========================================
+# --- Tab 2: บันทึกงานซ่อม ---
+# ==========================================
 with tab2:
   st.subheader("จัดการ อัปเดตงานซ่อม สาเหตุ วิธีแก้ไข และวัน-เวลาที่ซ่อมเสร็จ")
 
-  c.execute("SELECT id FROM repair_tickets ORDER BY id DESC")
-  ticket_ids = [row[0] for row in c.fetchall()]
+  if not df_data.empty:
+    df_display = df_data.copy()
 
-  if ticket_ids:
-    df_raw = pd.read_sql_query(
-        "SELECT * FROM repair_tickets ORDER BY id DESC", conn
-    )
-
-    # แปลงและแยกวันที่/เวลา
-    df_raw["created_dt"] = pd.to_datetime(
-        df_raw["created_at"], errors="coerce"
-    )
-    df_raw["completed_dt"] = pd.to_datetime(
-        df_raw["completed_at"], errors="coerce"
-    )
-
-    df_raw["วันที่แจ้งซ่อม"] = (
-        df_raw["created_dt"].dt.strftime("%Y-%m-%d").fillna("-")
-    )
-    df_raw["เวลาแจ้งซ่อม"] = (
-        df_raw["created_dt"].dt.strftime("%H:%M:%S").fillna("-")
-    )
-
-    df_raw["วันที่ซ่อมเสร็จ"] = (
-        df_raw["completed_dt"].dt.strftime("%Y-%m-%d").fillna("-")
-    )
-    df_raw["เวลาซ่อมเสร็จ"] = (
-        df_raw["completed_dt"].dt.strftime("%H:%M:%S").fillna("-")
-    )
-
-    # จัดระเบียบคอลัมน์ตาราง
-    df_all_display = df_raw[[
+    display_cols = [
         "id",
         "reporter",
         "department",
         "equipment",
         "priority",
         "status",
-        "วันที่แจ้งซ่อม",
-        "เวลาแจ้งซ่อม",
+        "report_date",
+        "report_time",
         "technician",
         "cause",
         "solution",
         "parts_used",
         "parts_qty",
-        "วันที่ซ่อมเสร็จ",
-        "เวลาซ่อมเสร็จ",
-    ]].copy()
+        "completed_date",
+        "completed_time",
+    ]
 
-    df_all_display.columns = [
+    df_show = df_display[display_cols].copy()
+    df_show.columns = [
         "ID",
         "ผู้แจ้ง",
         "แผนก",
@@ -235,170 +264,159 @@ with tab2:
     ]
 
     try:
-      styled_df = df_all_display.style.map(style_status, subset=["สถานะ"])
+      styled_df = df_show.style.map(style_status, subset=["สถานะ"])
     except AttributeError:
-      styled_df = df_all_display.style.applymap(style_status, subset=["สถานะ"])
+      styled_df = df_show.style.applymap(style_status, subset=["สถานะ"])
 
     st.dataframe(styled_df, use_container_width=True)
-
     st.markdown("---")
 
+    ticket_ids = df_data["id"].tolist()
     selected_id = st.selectbox("เลือก ID ที่ต้องการอัปเดตงานซ่อม", ticket_ids)
 
-    c.execute("SELECT * FROM repair_tickets WHERE id=?", (selected_id,))
-    ticket = c.fetchone()
+    row_idx = df_data[df_data["id"] == selected_id].index[0]
+    ticket = df_data.loc[row_idx]
 
-    if ticket:
-      col_info, col_form = st.columns([1, 1])
+    col_info, col_form = st.columns([1, 1])
 
-      # ดึงวันที่/เวลาแยกกันออกมาโชว์
-      t_created_dt = pd.to_datetime(ticket[7], errors="coerce")
-      t_created_date = (
-          t_created_dt.strftime("%Y-%m-%d")
-          if pd.notna(t_created_dt)
-          else ticket[7]
+    with col_info:
+      st.markdown(f"### 🔍 รายละเอียดใบแจ้งซ่อม ID: **{ticket['id']}**")
+      st.write(f"**ผู้แจ้ง:** {ticket['reporter']}")
+      st.write(f"**แผนก:** {ticket['department']}")
+      st.write(f"**อุปกรณ์:** {ticket['equipment']}")
+      st.write(f"**ความเร่งด่วน:** {ticket['priority']}")
+      st.write(f"**📅 วันที่แจ้งซ่อม:** {ticket['report_date']}")
+      st.write(f"**⏰ เวลาที่แจ้งซ่อม:** {ticket['report_time']}")
+      st.write(
+          f"**เวลาซ่อมเสร็จล่าสุด:** {ticket['completed_at'] or 'ยังไม่เสร็จสิ้น'}"
       )
-      t_created_time = (
-          t_created_dt.strftime("%H:%M:%S") if pd.notna(t_created_dt) else ""
-      )
+      st.info(f"**อาการเสีย:** {ticket['description']}")
 
-      with col_info:
-        st.markdown(f"### 🔍 รายละเอียดใบแจ้งซ่อม ID: **{ticket[0]}**")
-        st.write(f"**ผู้แจ้ง:** {ticket[1]}")
-        st.write(f"**แผนก:** {ticket[2]}")
-        st.write(f"**อุปกรณ์:** {ticket[3]}")
-        st.write(f"**ความเร่งด่วน:** {ticket[5]}")
-        st.write(f"**📅 วันที่แจ้งซ่อม:** {t_created_date}")
-        st.write(f"**⏰ เวลาที่แจ้งซ่อม:** {t_created_time}")
-        st.write(f"**เวลาซ่อมเสร็จล่าสุด:** {ticket[14] or 'ยังไม่เสร็จสิ้น'}")
-        st.info(f"**อาการเสีย:** {ticket[4]}")
+      st.markdown("#### 🖼️ รูปภาพประกอบ")
+      img_col1, img_col2 = st.columns(2)
 
-        st.markdown("#### 🖼️ เปรียบเทียบรูปภาพก่อน-หลังซ่อม")
-        img_col1, img_col2 = st.columns(2)
+      with img_col1:
+        st.caption("📷 **ก่อนซ่อม**")
+        img_b = base64_to_image(ticket["image_before"])
+        if img_b:
+          st.image(img_b, use_container_width=True)
+        else:
+          st.text("ไม่มีรูปก่อนซ่อม")
 
-        with img_col1:
-          st.caption("📷 **ก่อนซ่อม**")
-          if ticket[8]:
-            img_before = Image.open(io.BytesIO(ticket[8]))
-            st.image(img_before, use_container_width=True)
-          else:
-            st.text("ไม่มีรูปก่อนซ่อม")
+      with img_col2:
+        st.caption("✅ **หลังซ่อมเสร็จ**")
+        img_a = base64_to_image(ticket["image_after"])
+        if img_a:
+          st.image(img_a, use_container_width=True)
+        else:
+          st.text("ยังไม่ได้แนบรูปหลังซ่อม")
 
-        with img_col2:
-          st.caption("✅ **หลังซ่อมเสร็จ**")
-          if ticket[15]:
-            img_after = Image.open(io.BytesIO(ticket[15]))
-            st.image(img_after, use_container_width=True)
-          else:
-            st.text("ยังไม่ได้แนบรูปหลังซ่อม")
+    with col_form:
+      st.markdown("### 🛠️ บันทึกการซ่อมของช่าง")
+      with st.form(key="tech_form"):
+        status_list = ["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"]
+        curr_status = (
+            ticket["status"] if ticket["status"] in status_list else "รอดำเนินการ"
+        )
+        curr_idx = status_list.index(curr_status)
 
-      with col_form:
-        st.markdown("### 🛠️ บันทึกการซ่อมของช่าง")
-        with st.form(key="tech_form"):
-          status_list = [
-              "รอดำเนินการ",
-              "กำลังดำเนินการ",
-              "เสร็จสิ้น",
-              "ยกเลิก",
-          ]
-          curr_status_idx = (
-              status_list.index(ticket[6]) if ticket[6] in status_list else 0
-          )
+        new_status = st.selectbox("สถานะการซ่อม", status_list, index=curr_idx)
+        technician_name = st.text_input(
+            "ชื่อผู้ซ่อม / ช่างผู้รับผิดชอบ", value=str(ticket["technician"] or "")
+        )
 
-          new_status = st.selectbox(
-              "สถานะการซ่อม", status_list, index=curr_status_idx
-          )
-          technician_name = st.text_input(
-              "ชื่อผู้ซ่อม / ช่างผู้รับผิดชอบ", value=ticket[9] or ""
-          )
+        cause_input = st.text_area(
+            "สาเหตุของอาการเสีย / จุดที่ชำรุด", value=str(ticket["cause"] or "")
+        )
+        solution_input = st.text_area(
+            "วิธีแก้ไข / ดำเนินการซ่อม", value=str(ticket["solution"] or "")
+        )
 
-          cause_input = st.text_area(
-              "สาเหตุของอาการเสีย / จุดที่ชำรุด", value=ticket[10] or ""
-          )
-          solution_input = st.text_area(
-              "วิธีแก้ไข / ดำเนินการซ่อม", value=ticket[11] or ""
-          )
+        parts_used = st.text_input(
+            "อะไหล่ที่ใช้ (เช่น น็อต M6, สายไฟ)",
+            value=str(ticket["parts_used"] or ""),
+        )
+        parts_qty = st.text_input(
+            "จำนวนอะไหล่ (เช่น 2 ตัว, 1 เมตร)",
+            value=str(ticket["parts_qty"] or ""),
+        )
 
-          parts_used = st.text_input(
-              "อะไหล่ที่ใช้ (เช่น น็อต M6, สายไฟ)", value=ticket[12] or ""
-          )
-          parts_qty = st.text_input(
-              "จำนวนอะไหล่ (เช่น 2 ตัว, 1 เมตร)", value=ticket[13] or ""
-          )
+        st.markdown("---")
+        st.markdown("🕒 **ระบุวันและเวลาที่ซ่อมเสร็จ**")
 
-          st.markdown("---")
-          st.markdown("🕒 **ระบุวันและเวลาที่ซ่อมเสร็จ**")
-
-          default_dt = get_thailand_now_dt()
-          if ticket[14]:
-            try:
-              default_dt = datetime.strptime(ticket[14], "%Y-%m-%d %H:%M:%S")
-            except Exception:
-              pass
-
-          col_d, col_t = st.columns(2)
-          with col_d:
-            completed_date = st.date_input(
-                "📅 วันที่ซ่อมเสร็จ", value=default_dt.date()
+        default_dt = get_thailand_now_dt()
+        if ticket["completed_at"]:
+          try:
+            default_dt = datetime.fromisoformat(
+                str(ticket["completed_at"]).replace("Z", "+00:00")
             )
-          with col_t:
-            completed_time = st.time_input(
-                "⏰ เวลาที่ซ่อมเสร็จ",
-                value=default_dt.time().replace(microsecond=0),
-            )
+          except Exception:
+            pass
 
-          uploaded_after = st.file_uploader(
-              "📷 แนบรูปถ่ายหลังซ่อมเสร็จ", type=["jpg", "png", "jpeg"]
+        col_d, col_t = st.columns(2)
+        with col_d:
+          completed_date = st.date_input(
+              "📅 วันที่ซ่อมเสร็จ", value=default_dt.date()
+          )
+        with col_t:
+          completed_time = st.time_input(
+              "⏰ เวลาที่ซ่อมเสร็จ",
+              value=default_dt.time().replace(microsecond=0),
           )
 
-          save_btn = st.form_submit_button("💾 บันทึกข้อมูลงานซ่อม")
+        uploaded_after = st.file_uploader(
+            "📷 แนบรูปถ่ายหลังซ่อมเสร็จ", type=["jpg", "png", "jpeg"]
+        )
 
-          if save_btn:
-            image_after_bytes = ticket[15]
-            if uploaded_after is not None:
-              image_after_bytes = uploaded_after.read()
+        save_btn = st.form_submit_button("💾 บันทึกข้อมูลงานซ่อม")
 
-            completed_time_str = None
-            if new_status == "เสร็จสิ้น":
-              completed_time_str = f"{completed_date} {completed_time.strftime('%H:%M:%S')}"
-            else:
-              completed_time_str = ticket[14]
+        if save_btn:
+          img_after_b64 = ticket["image_after"]
+          if uploaded_after is not None:
+            img_after_b64 = compress_and_to_base64(uploaded_after.read())
 
-            c.execute(
-                """
-                            UPDATE repair_tickets 
-                            SET status=?, technician=?, cause=?, solution=?, parts_used=?, parts_qty=?, completed_at=?, image_after=?
-                            WHERE id=?
-                        """,
-                (
-                    new_status,
-                    technician_name,
-                    cause_input,
-                    solution_input,
-                    parts_used,
-                    parts_qty,
-                    completed_time_str,
-                    image_after_bytes,
-                    selected_id,
-                ),
-            )
-            conn.commit()
-            st.success(
-                f"✅ บันทึกข้อมูลงานซ่อม ID {selected_id} เรียบร้อยแล้ว!"
-            )
-            st.rerun()
+          comp_date_str = None
+          comp_time_str = None
+          comp_at_str = None
+
+          if new_status == "เสร็จสิ้น":
+            comp_date_str = str(completed_date)
+            comp_time_str = completed_time.strftime("%H:%M:%S")
+            comp_at_str = f"{comp_date_str} {comp_time_str}+07:00"
+
+          update_data = {
+              "status": new_status,
+              "technician": technician_name,
+              "cause": cause_input,
+              "solution": solution_input,
+              "parts_used": parts_used,
+              "parts_qty": parts_qty,
+              "completed_date": comp_date_str,
+              "completed_time": comp_time_str,
+              "completed_at": comp_at_str,
+              "image_after": img_after_b64,
+          }
+
+          supabase.table("repair_requests").update(update_data).eq(
+              "id", selected_id
+          ).execute()
+          st.success(
+              f"✅ บันทึกข้อมูลงานซ่อม ID {selected_id} ลง Supabase เรียบร้อยแล้ว!"
+          )
+          st.rerun()
+
   else:
     st.info("ยังไม่มีข้อมูลการแจ้งซ่อมในระบบ")
 
-# ===================================================
-# --- Tab 3: สรุปรายงาน & กราฟสรุป (เลือก รายวัน/สัปดาห์/เดือน/ปี) ---
-# ===================================================
+# ==========================================
+# --- Tab 3: รายงาน & กราฟ ---
+# ==========================================
 with tab3:
   st.subheader("📈 สรุปภาพรวม สถิติ และส่งออกข้อมูล")
 
-  df_stats = pd.read_sql_query("SELECT * FROM repair_tickets", conn)
+  if not df_data.empty:
+    df_stats = df_data.copy()
 
-  if not df_stats.empty:
     df_stats["created_at_dt"] = pd.to_datetime(
         df_stats["created_at"], errors="coerce"
     )
@@ -425,10 +443,6 @@ with tab3:
         else pd.Timedelta(0)
     )
 
-    total_repair_str = format_timedelta(total_time_td)
-    avg_repair_str = format_timedelta(avg_time_td)
-
-    # --- Metrics สรุป ---
     col_m1, col_m2, col_m3, col_m4, col_m5, col_m6 = st.columns(6)
     col_m1.metric("แจ้งซ่อมทั้งหมด", len(df_stats))
     col_m2.metric(
@@ -441,12 +455,11 @@ with tab3:
     col_m4.metric(
         "รอดำเนินการ", len(df_stats[df_stats["status"] == "รอดำเนินการ"])
     )
-    col_m5.metric("⏱️ เวลาซ่อมรวมทั้งหมด", total_repair_str)
-    col_m6.metric("⌛ เวลาซ่อมเฉลี่ย/งาน", avg_repair_str)
+    col_m5.metric("⏱️ เวลาซ่อมรวมทั้งหมด", format_timedelta(total_time_td))
+    col_m6.metric("⌛ เวลาซ่อมเฉลี่ย/งาน", format_timedelta(avg_time_td))
 
     st.markdown("---")
 
-    # --- กราฟสรุปผล ---
     col_g1, col_g2, col_g3 = st.columns(3)
 
     with col_g1:
@@ -532,45 +545,31 @@ with tab3:
     st.markdown("---")
     st.markdown("### 🛠️ ตารางรายงานการซ่อม (สำหรับส่งออกข้อมูล)")
 
-    # แยกคอลัมน์ วันที่/เวลา แจ้งซ่อม และ ซ่อมเสร็จ
-    df_stats["วันที่แจ้งซ่อม"] = (
-        df_stats["created_at_dt"].dt.strftime("%Y-%m-%d").fillna("-")
-    )
-    df_stats["เวลาแจ้งซ่อม"] = (
-        df_stats["created_at_dt"].dt.strftime("%H:%M:%S").fillna("-")
-    )
-
-    df_stats["วันที่ซ่อมเสร็จ"] = (
-        df_stats["completed_at_dt"].dt.strftime("%Y-%m-%d").fillna("-")
-    )
-    df_stats["เวลาซ่อมเสร็จ"] = (
-        df_stats["completed_at_dt"].dt.strftime("%H:%M:%S").fillna("-")
-    )
-
     df_stats["ระยะเวลาซ่อมรวม"] = df_stats["duration"].apply(format_timedelta)
     df_stats["สถานะรูปหลังซ่อม"] = df_stats["image_after"].apply(
-        lambda x: "✅ มีรูป" if x is not None else "❌ ไม่มี"
+        lambda x: "✅ มีรูป" if str(x).strip() != "" else "❌ ไม่มี"
     )
 
-    completed_df_display = df_stats[[
+    report_cols = [
         "id",
         "reporter",
         "department",
         "equipment",
         "status",
-        "วันที่แจ้งซ่อม",
-        "เวลาแจ้งซ่อม",
+        "report_date",
+        "report_time",
         "technician",
         "cause",
         "solution",
         "parts_used",
         "parts_qty",
-        "วันที่ซ่อมเสร็จ",
-        "เวลาซ่อมเสร็จ",
+        "completed_date",
+        "completed_time",
         "ระยะเวลาซ่อมรวม",
         "สถานะรูปหลังซ่อม",
-    ]].copy()
+    ]
 
+    completed_df_display = df_stats[report_cols].copy()
     completed_df_display.columns = [
         "ID",
         "ผู้แจ้ง",
@@ -601,24 +600,21 @@ with tab3:
 
     st.dataframe(styled_report_df, use_container_width=True)
 
-    # --- ปุ่มสำหรับดาวน์โหลดไฟล์ Excel / CSV ---
     st.markdown("#### 📥 ดาวน์โหลดรายงาน")
     col_dl1, col_dl2 = st.columns(2)
 
     file_timestamp = get_thailand_now_dt().strftime("%Y%m%d_%H%M")
 
-    # 1. ไฟล์ CSV
     csv_bytes = completed_df_display.to_csv(index=False).encode("utf-8-sig")
     with col_dl1:
       st.download_button(
-          label="📄 ดาวน์โหลดรายงาน (ไฟล์ CSV สำหรับ Excel)",
+          label="📄 ดาวน์โหลดรายงาน (ไฟล์ CSV)",
           data=csv_bytes,
           file_name=f"Repair_Report_{file_timestamp}.csv",
           mime="text/csv",
           use_container_width=True,
       )
 
-    # 2. ไฟล์ Excel .xlsx
     try:
       excel_buffer = io.BytesIO()
       with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
@@ -642,5 +638,3 @@ with tab3:
 
   else:
     st.info("ยังไม่มีข้อมูลสำหรับสร้างกราฟสรุปผล")
-
-conn.close()
