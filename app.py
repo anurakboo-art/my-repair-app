@@ -102,7 +102,7 @@ st.set_page_config(
 )
 
 # หัวกระดาษหลักของแอป
-st.title("🛠️ ใบแจ้งซ่อม-บันทึกการซ่อม")
+st.title("🛠️ ใบแจ้งซ่อม & บันทึกงาน PM")
 
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
@@ -111,6 +111,7 @@ supabase = create_client(url, key)
 COLUMN_NAMES = [
     "id",
     "reporter",
+    "job_type",
     "department",
     "equipment",
     "description",
@@ -147,6 +148,9 @@ def load_data():
     for col in COLUMN_NAMES:
       if col not in df.columns:
         df[col] = ""
+
+    # กำหนดค่าเริ่มต้นของ job_type เป็น 'แจ้งซ่อม' หากข้อมูลเก่าเป็นค่าว่าง
+    df["job_type"] = df["job_type"].replace("", "แจ้งซ่อม").fillna("แจ้งซ่อม")
     return df
   except Exception as e:
     st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูล: {e}")
@@ -168,23 +172,26 @@ else:
   all_departments = default_depts
 
 tab1, tab2, tab3 = st.tabs([
-    "📝 ส่งใบแจ้งซ่อม",
-    "⚙️ จัดการ/แก้ไขงานซ่อม (สำหรับช่าง)",
+    "📝 บันทึกงานแจ้งซ่อม / PM",
+    "⚙️ จัดการ/แก้ไขงาน (สำหรับช่าง)",
     "📊 รายงาน & กราฟสรุปผล",
 ])
 
 # ==========================================
-# --- Tab 1: ฟอร์มแจ้งซ่อม ---
+# --- Tab 1: ฟอร์มแจ้งซ่อม / PM ---
 # ==========================================
 with tab1:
-  st.subheader("กรอกข้อมูลการแจ้งซ่อมใหม่")
+  st.subheader("กรอกข้อมูลการแจ้งซ่อม / งาน PM ใหม่")
   with st.form(key="repair_form", clear_on_submit=True):
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
       reporter = st.text_input("ชื่อผู้แจ้ง *")
 
     with col2:
+      job_type = st.selectbox("ประเภทงาน *", ["แจ้งซ่อม", "PM"])
+
+    with col3:
       dept_options = all_departments + ["➕ พิมพ์ระบุแผนกใหม่..."]
       dept_choice = st.selectbox("เลือกแผนก / โซน *", dept_options)
       if dept_choice == "➕ พิมพ์ระบุแผนกใหม่...":
@@ -192,29 +199,30 @@ with tab1:
       else:
         department = dept_choice
 
-    with col3:
+    with col4:
       priority = st.selectbox(
           "ระดับความเร่งด่วน", ["ปกติ", "ด่วน", "ด่วนที่สุด"]
       )
 
-    equipment = st.text_input("อุปกรณ์ / สถานที่ ที่ต้องการแจ้งซ่อม *")
-    description = st.text_area("รายละเอียดปัญหาอาการเสีย *")
+    equipment = st.text_input("อุปกรณ์ / เครื่องจักร / สถานที่ *")
+    description = st.text_area("รายละเอียดปัญหาอาการเสีย / รายการ PM *")
 
-    st.markdown("🕒 **วันและเวลาที่เกิดเหตุ / แจ้งซ่อม**")
+    st.markdown("🕒 **วันและเวลาที่เกิดเหตุ / บันทึกงาน**")
     now_dt = get_thailand_now_dt()
     col_d, col_t = st.columns(2)
     with col_d:
-      report_date = st.date_input("📅 วันที่แจ้งซ่อม", value=now_dt.date())
+      report_date = st.date_input("📅 วันที่บันทึก", value=now_dt.date())
     with col_t:
       report_time = st.time_input(
-          "⏰ เวลาที่แจ้งซ่อม", value=now_dt.time().replace(microsecond=0)
+          "⏰ เวลาที่บันทึก", value=now_dt.time().replace(microsecond=0)
       )
 
     uploaded_file = st.file_uploader(
-        "📷 แนบรูปภาพอุปกรณ์เสียก่อนซ่อม (ถ้ามี)", type=["jpg", "png", "jpeg"]
+        "📷 แนบรูปภาพอุปกรณ์ก่อนซ่อม/ทำ PM (ถ้ามี)",
+        type=["jpg", "png", "jpeg"],
     )
 
-    submit_button = st.form_submit_button(label="ส่งข้อมูลแจ้งซ่อม")
+    submit_button = st.form_submit_button(label="ส่งข้อมูลบันทึกงาน")
 
     if submit_button:
       if reporter and department and equipment and description:
@@ -228,6 +236,7 @@ with tab1:
 
         new_data = {
             "reporter": reporter,
+            "job_type": job_type,
             "department": department.strip(),
             "equipment": equipment,
             "description": description,
@@ -249,16 +258,16 @@ with tab1:
         }
 
         res = supabase.table("repair_requests").insert(new_data).execute()
-        st.success("✅ ส่งข้อมูลแจ้งซ่อมเรียบร้อยแล้ว!")
+        st.success("✅ บันทึกข้อมูลเรียบร้อยแล้ว!")
         st.rerun()
       else:
         st.warning("⚠️ กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบถ้วน")
 
 # ==========================================
-# --- Tab 2: จัดการ / แก้ไขงานซ่อม ---
+# --- Tab 2: จัดการ / แก้ไขงาน ---
 # ==========================================
 with tab2:
-  st.subheader("🛠️ แก้ไขและอัปเดตข้อมูลงานซ่อม (สามารถปรับแก้ได้ทุกช่อง)")
+  st.subheader("🛠️ แก้ไขและอัปเดตข้อมูลงานซ่อม / PM")
 
   if not df_data.empty:
     df_display = df_data.copy()
@@ -266,6 +275,7 @@ with tab2:
     display_cols = [
         "id",
         "reporter",
+        "job_type",
         "department",
         "equipment",
         "priority",
@@ -283,6 +293,7 @@ with tab2:
     df_show.columns = [
         "ID",
         "ผู้แจ้ง",
+        "ประเภทงาน",
         "แผนก",
         "อุปกรณ์",
         "ความเร่งด่วน",
@@ -315,9 +326,9 @@ with tab2:
     now_dt = get_thailand_now_dt()
 
     # --- ปุ่มลบใบแจ้งซ่อม ---
-    with st.expander("⚠️ ต้องการลบใบแจ้งซ่อมนี้?"):
+    with st.expander("⚠️ ต้องการลบรายการนี้?"):
       st.write(
-          f"หากต้องการลบใบแจ้งซ่อม ID **{selected_id}** ออกจากฐานข้อมูล ให้กดปุ่มด้านล่าง"
+          f"หากต้องการลบรายการ ID **{selected_id}** ออกจากฐานข้อมูล ให้กดปุ่มด้านล่าง"
       )
       if st.button(
           f"🗑️ ยืนยันลบ ID {selected_id}", type="primary", key="del_btn"
@@ -325,16 +336,23 @@ with tab2:
         supabase.table("repair_requests").delete().eq(
             "id", selected_id
         ).execute()
-        st.success(f"🗑️ ลบใบแจ้งซ่อม ID {selected_id} เรียบร้อยแล้ว!")
+        st.success(f"🗑️ ลบรายการ ID {selected_id} เรียบร้อยแล้ว!")
         st.rerun()
 
     # --- ฟอร์มแก้ไขข้อมูลทั้งหมด ---
     with st.form(key="edit_full_form"):
-      st.markdown(f"### ✏️ แก้ไขข้อมูลใบแจ้งซ่อม ID: **{ticket['id']}**")
+      st.markdown(f"### ✏️ แก้ไขข้อมูลรายการ ID: **{ticket['id']}**")
 
       # --- ส่วนที่ 1: ข้อมูลผู้แจ้งซ่อม ---
-      st.markdown("#### 1️⃣ ข้อมูลการแจ้งซ่อม (ฝั่งผู้แจ้ง)")
-      col_e1, col_e2, col_e3 = st.columns(3)
+      st.markdown("#### 1️⃣ ข้อมูลการแจ้ง (ฝั่งผู้แจ้ง)")
+      col_e1, col_e2, col_e3, col_e4 = st.columns(4)
+
+      job_type_list = ["แจ้งซ่อม", "PM"]
+      curr_job_type = (
+          ticket["job_type"]
+          if ticket["job_type"] in job_type_list
+          else "แจ้งซ่อม"
+      )
 
       curr_ticket_dept = str(ticket["department"] or "").strip()
       edit_dept_base = sorted(list(set(all_departments + [curr_ticket_dept])))
@@ -361,6 +379,11 @@ with tab2:
         )
 
       with col_e2:
+        job_type_edit = st.selectbox(
+            "ประเภทงาน", job_type_list, index=job_type_list.index(curr_job_type)
+        )
+
+      with col_e3:
         dept_choice_edit = st.selectbox(
             "แผนก / โซน", edit_dept_options, index=curr_dept_idx
         )
@@ -371,7 +394,7 @@ with tab2:
         else:
           department_edit = dept_choice_edit
 
-      with col_e3:
+      with col_e4:
         priority_edit = st.selectbox(
             "ระดับความเร่งด่วน",
             prio_options,
@@ -386,7 +409,7 @@ with tab2:
           value=str(ticket["description"] or ""),
       )
 
-      st.markdown("🕒 **วันและเวลาที่แจ้งซ่อม (แก้ไขได้)**")
+      st.markdown("🕒 **วันและเวลาที่แจ้ง (แก้ไขได้)**")
       col_rd, col_rt = st.columns(2)
 
       init_rep_date = parse_date(ticket["report_date"], now_dt.date())
@@ -395,13 +418,9 @@ with tab2:
       )
 
       with col_rd:
-        report_date_edit = st.date_input(
-            "📅 วันที่แจ้งซ่อม", value=init_rep_date
-        )
+        report_date_edit = st.date_input("📅 วันที่แจ้ง", value=init_rep_date)
       with col_rt:
-        report_time_edit = st.time_input(
-            "⏰ เวลาที่แจ้งซ่อม", value=init_rep_time
-        )
+        report_time_edit = st.time_input("⏰ เวลาที่แจ้ง", value=init_rep_time)
 
       col_img1, col_img2 = st.columns(2)
       with col_img1:
@@ -430,7 +449,7 @@ with tab2:
       col_t1, col_t2 = st.columns(2)
       with col_t1:
         new_status = st.selectbox(
-            "สถานะการซ่อม",
+            "สถานะการทำงาน",
             status_list,
             index=status_list.index(curr_status),
         )
@@ -443,7 +462,7 @@ with tab2:
           "สาเหตุการชำรุด", value=str(ticket["cause"] or "")
       )
       solution_input = st.text_area(
-          "วิธีแก้ไข", value=str(ticket["solution"] or "")
+          "วิธีแก้ไข / รายการทำ PM", value=str(ticket["solution"] or "")
       )
 
       col_p1, col_p2 = st.columns(2)
@@ -456,7 +475,7 @@ with tab2:
             "จำนวนอะไหล่", value=str(ticket["parts_qty"] or "")
         )
 
-      st.markdown("🕒 **วันและเวลาที่ซ่อมเสร็จ (แก้ไขได้)**")
+      st.markdown("🕒 **วันและเวลาที่เสร็จสิ้น (แก้ไขได้)**")
 
       init_comp_date = parse_date(ticket["completed_date"], now_dt.date())
       init_comp_time = parse_time(
@@ -466,11 +485,11 @@ with tab2:
       col_cd, col_ct = st.columns(2)
       with col_cd:
         completed_date_edit = st.date_input(
-            "📅 วันที่ซ่อมเสร็จ", value=init_comp_date
+            "📅 วันที่เสร็จสิ้น", value=init_comp_date
         )
       with col_ct:
         completed_time_edit = st.time_input(
-            "⏰ เวลาที่ซ่อมเสร็จ", value=init_comp_time
+            "⏰ เวลาที่เสร็จสิ้น", value=init_comp_time
         )
 
       with col_img2:
@@ -491,20 +510,16 @@ with tab2:
       )
 
       if save_btn:
-        # การจัดการรูปภาพก่อนซ่อม
         img_before_b64 = ticket["image_before"]
         if uploaded_before_edit is not None:
           img_before_b64 = compress_and_to_base64(uploaded_before_edit.read())
 
-        # การจัดการรูปภาพหลังซ่อม
         img_after_b64 = ticket["image_after"]
         if uploaded_after_edit is not None:
           img_after_b64 = compress_and_to_base64(uploaded_after_edit.read())
 
-        # คำนวณ ISO Timestamp วันที่แจ้ง
         created_at_str = f"{report_date_edit} {report_time_edit.strftime('%H:%M:%S')}+07:00"
 
-        # คำนวณ ISO Timestamp วันที่เสร็จ
         comp_date_str = None
         comp_time_str = None
         comp_at_str = None
@@ -516,6 +531,7 @@ with tab2:
 
         update_data = {
             "reporter": reporter_edit,
+            "job_type": job_type_edit,
             "department": department_edit.strip(),
             "equipment": equipment_edit,
             "description": description_edit,
@@ -540,7 +556,7 @@ with tab2:
             "id", selected_id
         ).execute()
         st.success(
-            f"✅ แก้ไขข้อมูลใบแจ้งซ่อม ID {selected_id} และอัปเดตลง Supabase เรียบร้อยแล้ว!"
+            f"✅ แก้ไขข้อมูลรายการ ID {selected_id} และอัปเดตลง Supabase เรียบร้อยแล้ว!"
         )
         st.rerun()
 
@@ -556,7 +572,6 @@ with tab3:
   if not df_data.empty:
     df_stats = df_data.copy()
 
-    # แก้ไขการจัดการ Timezone ให้เปรียบเทียบและลบกันได้โดยไม่มีปัญหา TypeError
     df_stats["created_at_dt"] = pd.to_datetime(
         df_stats["created_at"], errors="coerce", utc=True
     ).dt.tz_convert("Asia/Bangkok")
@@ -583,17 +598,15 @@ with tab3:
         else pd.Timedelta(0)
     )
 
+    count_repair = len(df_stats[df_stats["job_type"] == "แจ้งซ่อม"])
+    count_pm = len(df_stats[df_stats["job_type"] == "PM"])
+
     col_m1, col_m2, col_m3, col_m4, col_m5, col_m6 = st.columns(6)
-    col_m1.metric("แจ้งซ่อมทั้งหมด", len(df_stats))
-    col_m2.metric(
-        "เสร็จสิ้นแล้ว", len(df_stats[df_stats["status"] == "เสร็จสิ้น"])
-    )
-    col_m3.metric(
-        "กำลังดำเนินการ",
-        len(df_stats[df_stats["status"] == "กำลังดำเนินการ"]),
-    )
+    col_m1.metric("งานทั้งหมด", len(df_stats))
+    col_m2.metric("🛠️ งานแจ้งซ่อม", count_repair)
+    col_m3.metric("⚙️ งาน PM", count_pm)
     col_m4.metric(
-        "รอดำเนินการ", len(df_stats[df_stats["status"] == "รอดำเนินการ"])
+        "เสร็จสิ้นแล้ว", len(df_stats[df_stats["status"] == "เสร็จสิ้น"])
     )
     col_m5.metric("⏱️ เวลาซ่อมรวมทั้งหมด", format_timedelta(total_time_td))
     col_m6.metric("⌛ เวลาซ่อมเฉลี่ย/งาน", format_timedelta(avg_time_td))
@@ -604,9 +617,22 @@ with tab3:
 
     with col_g1:
       period_type = st.selectbox(
-          "🗓️ เลือกมุมมองช่วงเวลาของกราฟ",
+          "🗓️ ช่วงเวลาของกราฟแท่ง",
           ["รายวัน", "รายสัปดาห์", "รายเดือน", "รายปี"],
           index=2,
+      )
+
+      chart_color_by = st.radio(
+          "🎨 แสดงสีแท่งกราฟแยกตาม",
+          ["แผนก", "สถานะ", "ประเภทงาน"],
+          horizontal=True,
+      )
+
+      # แมปชื่อคอลัมน์สำหรับการแยกสี
+      color_col = (
+          "department"
+          if chart_color_by == "แผนก"
+          else ("status" if chart_color_by == "สถานะ" else "job_type")
       )
 
       if period_type == "รายวัน":
@@ -619,48 +645,55 @@ with tab3:
         df_stats["Period"] = df_stats["created_at_dt"].dt.strftime("%Y")
 
       summary_by_period = (
-          df_stats.groupby(["Period", "status"])
+          df_stats.groupby(["Period", color_col])
           .size()
           .reset_index(name="จำนวนงาน")
       )
+
+      # กำหนดสีเฉพาะสำหรับบางกลุ่ม
+      color_map = None
+      if color_col == "status":
+        color_map = {
+            "เสร็จสิ้น": "#28a745",
+            "รอดำเนินการ": "#ffc107",
+            "ยกเลิก": "#dc3545",
+            "กำลังดำเนินการ": "#17a2b8",
+        }
+      elif color_col == "job_type":
+        color_map = {"แจ้งซ่อม": "#007bff", "PM": "#6f42c1"}
 
       fig_bar = px.bar(
           summary_by_period,
           x="Period",
           y="จำนวนงาน",
-          color="status",
-          title=f"สถิติใบแจ้งซ่อม ({period_type})",
-          labels={"Period": f"ช่วงเวลา ({period_type})", "จำนวนงาน": "รายการ"},
-          color_discrete_map={
-              "เสร็จสิ้น": "#28a745",
-              "รอดำเนินการ": "#ffc107",
-              "ยกเลิก": "#dc3545",
-              "กำลังดำเนินการ": "#17a2b8",
+          color=color_col,
+          title=f"สถิติจำนวนงาน ({period_type}) - แยกตาม{chart_color_by}",
+          labels={
+              "Period": f"ช่วงเวลา ({period_type})",
+              "จำนวนงาน": "รายการ",
+              color_col: chart_color_by,
           },
+          color_discrete_map=color_map,
           barmode="stack",
           text_auto=True,
       )
       st.plotly_chart(fig_bar, use_container_width=True)
 
     with col_g2:
-      st.markdown("### ⏱️ เวลาซ่อมรวมแยกตามแผนก")
-      dept_time = (
-          completed_tickets.groupby("department")["duration_hours"]
-          .sum()
-          .reset_index()
+      st.markdown("### 📊 สัดส่วนประเภทงาน (แจ้งซ่อม vs PM)")
+      job_type_summary = (
+          df_stats.groupby("job_type").size().reset_index(name="จำนวนงาน")
       )
-      dept_time["duration_hours"] = dept_time["duration_hours"].round(2)
 
-      fig_dept_time = px.bar(
-          dept_time,
-          x="department",
-          y="duration_hours",
-          color="department",
-          title="เวลาซ่อมรวมทั้งหมดแยกตามแผนก (ชม.)",
-          labels={"department": "แผนก", "duration_hours": "ชั่วโมงรวม"},
-          text_auto=True,
+      fig_job_pie = px.pie(
+          job_type_summary,
+          values="จำนวนงาน",
+          names="job_type",
+          title="สัดส่วนประเภทงาน",
+          color="job_type",
+          color_discrete_map={"แจ้งซ่อม": "#007bff", "PM": "#6f42c1"},
       )
-      st.plotly_chart(fig_dept_time, use_container_width=True)
+      st.plotly_chart(fig_job_pie, use_container_width=True)
 
     with col_g3:
       st.markdown("### 🚨 สัดส่วนความเร่งด่วน")
@@ -683,7 +716,7 @@ with tab3:
       st.plotly_chart(fig_pie, use_container_width=True)
 
     st.markdown("---")
-    st.markdown("### 🛠️ ตารางรายงานการซ่อม (สำหรับส่งออกข้อมูล)")
+    st.markdown("### 🛠️ ตารางรายงานการทำงาน (สำหรับส่งออกข้อมูล)")
 
     df_stats["ระยะเวลาซ่อมรวม"] = df_stats["duration"].apply(format_timedelta)
     df_stats["สถานะรูปหลังซ่อม"] = df_stats["image_after"].apply(
@@ -693,6 +726,7 @@ with tab3:
     report_cols = [
         "id",
         "reporter",
+        "job_type",
         "department",
         "equipment",
         "status",
@@ -713,18 +747,19 @@ with tab3:
     completed_df_display.columns = [
         "ID",
         "ผู้แจ้ง",
+        "ประเภทงาน",
         "แผนก",
         "อุปกรณ์",
         "สถานะ",
-        "วันที่แจ้งซ่อม",
-        "เวลาแจ้งซ่อม",
+        "วันที่แจ้ง",
+        "เวลาแจ้ง",
         "ช่างผู้ซ่อม",
         "สาเหตุ",
         "วิธีแก้ไข",
         "อะไหล่ที่ใช้",
         "จำนวน",
-        "วันที่ซ่อมเสร็จ",
-        "เวลาซ่อมเสร็จ",
+        "วันที่เสร็จ",
+        "เวลาเสร็จ",
         "ระยะเวลาซ่อมรวม",
         "สถานะรูปหลังซ่อม",
     ]
@@ -759,7 +794,7 @@ with tab3:
       excel_buffer = io.BytesIO()
       with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
         completed_df_display.to_excel(
-            writer, index=False, sheet_name="รายงานการซ่อม"
+            writer, index=False, sheet_name="รายงานการซ่อม_PM"
         )
       excel_data = excel_buffer.getvalue()
 
