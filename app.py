@@ -76,12 +76,12 @@ st.set_page_config(
     page_title="ระบบแจ้งซ่อมและบันทึกผลงาน", page_icon="🛠️", layout="wide"
 )
 
-st.title("🛠️ ระบบแจ้งซ่อม บันทึกผลงาน และส่งออกรายงาน Excel")
+st.title("🛠️ ระบบแจ้งซ่อม บันทึกผลงาน และรายงานสถิติ")
 
 tab1, tab2, tab3 = st.tabs([
     "📝 ส่งใบแจ้งซ่อม",
     "⚙️ บันทึกงานซ่อม (สำหรับช่าง)",
-    "📊 รายงาน & กราฟสรุปประจำเดือน",
+    "📊 รายงาน & กราฟสรุปผล",
 ])
 
 # ==========================================
@@ -300,10 +300,10 @@ with tab2:
     st.info("ยังไม่มีข้อมูลการแจ้งซ่อมในระบบ")
 
 # ===================================================
-# --- Tab 3: สรุปรายงาน & กราฟ + ปุ่มโหลด Excel ---
+# --- Tab 3: สรุปรายงาน & กราฟสรุป (เลือก รายวัน/สัปดาห์/เดือน/ปี) ---
 # ===================================================
 with tab3:
-  st.subheader("📈 สรุปภาพรวม สถิติ และส่งออกข้อมูลเป็น Excel")
+  st.subheader("📈 สรุปภาพรวม สถิติ และส่งออกข้อมูล")
 
   df_stats = pd.read_sql_query("SELECT * FROM repair_tickets", conn)
 
@@ -314,7 +314,6 @@ with tab3:
     df_stats["completed_at_dt"] = pd.to_datetime(
         df_stats["completed_at"], errors="coerce"
     )
-    df_stats["YearMonth"] = df_stats["created_at_dt"].dt.strftime("%Y-%m")
 
     df_stats["duration"] = (
         df_stats["completed_at_dt"] - df_stats["created_at_dt"]
@@ -360,26 +359,43 @@ with tab3:
     col_g1, col_g2, col_g3 = st.columns(3)
 
     with col_g1:
-      st.markdown("### 🗓️ รายเดือน (ตามสถานะ)")
-      monthly_summary = (
-          df_stats.groupby(["YearMonth", "status"])
+      # เพิ่ม Selectbox เลือกรูปแบบช่วงเวลา
+      period_type = st.selectbox(
+          "🗓️ เลือกมุมมองช่วงเวลาของกราฟ",
+          ["รายวัน", "รายสัปดาห์", "รายเดือน", "รายปี"],
+          index=2,  # ค่าเริ่มต้นคือ รายเดือน
+      )
+
+      # แปลงฟอร์แมตวันที่ตามที่เลือก
+      if period_type == "รายวัน":
+        df_stats["Period"] = df_stats["created_at_dt"].dt.strftime("%Y-%m-%d")
+      elif period_type == "รายสัปดาห์":
+        df_stats["Period"] = df_stats["created_at_dt"].dt.strftime("%Y-W%U")
+      elif period_type == "รายเดือน":
+        df_stats["Period"] = df_stats["created_at_dt"].dt.strftime("%Y-%m")
+      else:  # รายปี
+        df_stats["Period"] = df_stats["created_at_dt"].dt.strftime("%Y")
+
+      summary_by_period = (
+          df_stats.groupby(["Period", "status"])
           .size()
           .reset_index(name="จำนวนงาน")
       )
 
       fig_bar = px.bar(
-          monthly_summary,
-          x="YearMonth",
+          summary_by_period,
+          x="Period",
           y="จำนวนงาน",
           color="status",
-          title="ใบแจ้งซ่อมในแต่ละเดือน",
-          labels={"YearMonth": "เดือน", "จำนวนงาน": "รายการ"},
+          title=f"สถิติใบแจ้งซ่อม ({period_type})",
+          labels={"Period": f"ช่วงเวลา ({period_type})", "จำนวนงาน": "รายการ"},
           barmode="stack",
+          text_auto=True,
       )
       st.plotly_chart(fig_bar, use_container_width=True)
 
     with col_g2:
-      st.markdown("### ⏱️ เวลาซ่อมรวมแยกตามแผนก (ชั่วโมง)")
+      st.markdown("### ⏱️ เวลาซ่อมรวมแยกตามแผนก")
       dept_time = (
           completed_tickets.groupby("department")["duration_hours"]
           .sum()
@@ -479,13 +495,13 @@ with tab3:
 
     st.dataframe(completed_df_display, use_container_width=True)
 
-    # --- เพิ่มปุ่มสำหรับดาวน์โหลดไฟล์ Excel / CSV ---
+    # --- ปุ่มสำหรับดาวน์โหลดไฟล์ Excel / CSV ---
     st.markdown("#### 📥 ดาวน์โหลดรายงาน")
     col_dl1, col_dl2 = st.columns(2)
 
     file_timestamp = get_thailand_now_dt().strftime("%Y%m%d_%H%M")
 
-    # 1. ปุ่มดาวน์โหลดไฟล์ CSV (เปิดใน Excel ภาษาไทยไม่ต่างดาว)
+    # 1. ไฟล์ CSV
     csv_bytes = completed_df_display.to_csv(index=False).encode("utf-8-sig")
     with col_dl1:
       st.download_button(
@@ -496,7 +512,7 @@ with tab3:
           use_container_width=True,
       )
 
-    # 2. ปุ่มดาวน์โหลดไฟล์ Excel .xlsx
+    # 2. ไฟล์ Excel .xlsx
     try:
       excel_buffer = io.BytesIO()
       with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
