@@ -76,7 +76,7 @@ st.set_page_config(
     page_title="ระบบแจ้งซ่อมและบันทึกผลงาน", page_icon="🛠️", layout="wide"
 )
 
-st.title("🛠️ ระบบแจ้งซ่อม บันทึกผลงาน และระบุวัน-เวลาซ่อมเสร็จ")
+st.title("🛠️ ระบบแจ้งซ่อม บันทึกผลงาน และส่งออกรายงาน Excel")
 
 tab1, tab2, tab3 = st.tabs([
     "📝 ส่งใบแจ้งซ่อม",
@@ -235,11 +235,9 @@ with tab2:
               "จำนวนอะไหล่ (เช่น 2 ตัว, 1 เมตร)", value=ticket[13] or ""
           )
 
-          # --- เพิ่มส่วนระบุวันและเวลาที่ซ่อมเสร็จ ---
           st.markdown("---")
           st.markdown("🕒 **ระบุวันและเวลาที่ซ่อมเสร็จ**")
 
-          # ดึงเวลาเดิม หรือใช้เวลาปัจจุบันของไทย
           default_dt = get_thailand_now_dt()
           if ticket[14]:
             try:
@@ -269,12 +267,10 @@ with tab2:
             if uploaded_after is not None:
               image_after_bytes = uploaded_after.read()
 
-            # รวมวันและเวลาที่เลือกเข้าด้วยกัน
             completed_time_str = None
             if new_status == "เสร็จสิ้น":
               completed_time_str = f"{completed_date} {completed_time.strftime('%H:%M:%S')}"
             else:
-              # ถ้าไม่อยู่ในสถานะเสร็จสิ้น ให้ใช้ค่าเดิมกรณีเคยบันทึกไว้
               completed_time_str = ticket[14]
 
             c.execute(
@@ -304,10 +300,10 @@ with tab2:
     st.info("ยังไม่มีข้อมูลการแจ้งซ่อมในระบบ")
 
 # ===================================================
-# --- Tab 3: สรุปรายงาน & กราฟประจำเดือน ---
+# --- Tab 3: สรุปรายงาน & กราฟ + ปุ่มโหลด Excel ---
 # ===================================================
 with tab3:
-  st.subheader("📈 สรุปภาพรวม สถิติ และระยะเวลาซ่อม")
+  st.subheader("📈 สรุปภาพรวม สถิติ และส่งออกข้อมูลเป็น Excel")
 
   df_stats = pd.read_sql_query("SELECT * FROM repair_tickets", conn)
 
@@ -320,7 +316,6 @@ with tab3:
     )
     df_stats["YearMonth"] = df_stats["created_at_dt"].dt.strftime("%Y-%m")
 
-    # คำนวณระยะเวลาซ่อม
     df_stats["duration"] = (
         df_stats["completed_at_dt"] - df_stats["created_at_dt"]
     )
@@ -424,9 +419,7 @@ with tab3:
       st.plotly_chart(fig_pie, use_container_width=True)
 
     st.markdown("---")
-    st.markdown(
-        "### 🛠️ รายงานการซ่อม วันและเวลาซ่อมเสร็จ สาเหตุ วิธีแก้ไข"
-    )
+    st.markdown("### 🛠️ ตารางรายงานการซ่อม")
 
     completed_df = df_stats[df_stats["technician"].notna()][
         [
@@ -485,6 +478,45 @@ with tab3:
     ]
 
     st.dataframe(completed_df_display, use_container_width=True)
+
+    # --- เพิ่มปุ่มสำหรับดาวน์โหลดไฟล์ Excel / CSV ---
+    st.markdown("#### 📥 ดาวน์โหลดรายงาน")
+    col_dl1, col_dl2 = st.columns(2)
+
+    file_timestamp = get_thailand_now_dt().strftime("%Y%m%d_%H%M")
+
+    # 1. ปุ่มดาวน์โหลดไฟล์ CSV (เปิดใน Excel ภาษาไทยไม่ต่างดาว)
+    csv_bytes = completed_df_display.to_csv(index=False).encode("utf-8-sig")
+    with col_dl1:
+      st.download_button(
+          label="📄 ดาวน์โหลดรายงาน (ไฟล์ CSV สำหรับ Excel)",
+          data=csv_bytes,
+          file_name=f"Repair_Report_{file_timestamp}.csv",
+          mime="text/csv",
+          use_container_width=True,
+      )
+
+    # 2. ปุ่มดาวน์โหลดไฟล์ Excel .xlsx
+    try:
+      excel_buffer = io.BytesIO()
+      with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+        completed_df_display.to_excel(
+            writer, index=False, sheet_name="รายงานการซ่อม"
+        )
+      excel_data = excel_buffer.getvalue()
+
+      with col_dl2:
+        st.download_button(
+            label="📊 ดาวน์โหลดรายงาน (ไฟล์ Excel .xlsx)",
+            data=excel_data,
+            file_name=f"Repair_Report_{file_timestamp}.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            use_container_width=True,
+        )
+    except Exception:
+      pass
 
   else:
     st.info("ยังไม่มีข้อมูลสำหรับสร้างกราฟสรุปผล")
