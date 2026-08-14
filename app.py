@@ -8,13 +8,31 @@ import streamlit as st
 from supabase import create_client
 
 # -------------------------------------------------------------
-# 1. กำหนดเขตเวลาประเทศไทย (UTC+7)
+# 1. กำหนดเขตเวลาประเทศไทย (UTC+7) และฟังก์ชันจัดการเวลา
 # -------------------------------------------------------------
 THAILAND_TZ = timezone(timedelta(hours=7))
 
 
 def get_thailand_now_dt():
   return datetime.now(THAILAND_TZ)
+
+
+def parse_date(val, default_date):
+  if not val or pd.isna(val):
+    return default_date
+  try:
+    return pd.to_datetime(val).date()
+  except Exception:
+    return default_date
+
+
+def parse_time(val, default_time):
+  if not val or pd.isna(val):
+    return default_time
+  try:
+    return datetime.strptime(str(val)[:8], "%H:%M:%S").time()
+  except Exception:
+    return default_time
 
 
 def format_timedelta(td):
@@ -138,7 +156,7 @@ df_data = load_data()
 
 tab1, tab2, tab3 = st.tabs([
     "📝 ส่งใบแจ้งซ่อม",
-    "⚙️ บันทึกงานซ่อม (สำหรับช่าง)",
+    "⚙️ จัดการ/แก้ไขงานซ่อม (สำหรับช่าง)",
     "📊 รายงาน & กราฟสรุปผล",
 ])
 
@@ -146,7 +164,7 @@ tab1, tab2, tab3 = st.tabs([
 # --- Tab 1: ฟอร์มแจ้งซ่อม ---
 # ==========================================
 with tab1:
-  st.subheader("กรอกข้อมูลการแจ้งซ่อม")
+  st.subheader("กรอกข้อมูลการแจ้งซ่อมใหม่")
   with st.form(key="repair_form", clear_on_submit=True):
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -218,10 +236,10 @@ with tab1:
         st.warning("⚠️ กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบถ้วน")
 
 # ==========================================
-# --- Tab 2: บันทึกงานซ่อม ---
+# --- Tab 2: จัดการ / แก้ไขงานซ่อม ---
 # ==========================================
 with tab2:
-  st.subheader("จัดการ อัปเดตงานซ่อม สาเหตุ วิธีแก้ไข และวัน-เวลาที่ซ่อมเสร็จ")
+  st.subheader("🛠️ แก้ไขและอัปเดตข้อมูลงานซ่อม (สามารถปรับแก้ได้ทุกช่อง)")
 
   if not df_data.empty:
     df_display = df_data.copy()
@@ -238,8 +256,6 @@ with tab2:
         "technician",
         "cause",
         "solution",
-        "parts_used",
-        "parts_qty",
         "completed_date",
         "completed_time",
     ]
@@ -252,15 +268,13 @@ with tab2:
         "อุปกรณ์",
         "ความเร่งด่วน",
         "สถานะ",
-        "วันที่แจ้งซ่อม",
-        "เวลาแจ้งซ่อม",
+        "วันที่แจ้ง",
+        "เวลาแจ้ง",
         "ผู้ซ่อม",
         "สาเหตุ",
         "วิธีแก้ไข",
-        "อะไหล่ที่ใช้",
-        "จำนวน",
-        "วันที่ซ่อมเสร็จ",
-        "เวลาซ่อมเสร็จ",
+        "วันที่เสร็จ",
+        "เวลาเสร็จ",
     ]
 
     try:
@@ -272,138 +286,233 @@ with tab2:
     st.markdown("---")
 
     ticket_ids = df_data["id"].tolist()
-    selected_id = st.selectbox("เลือก ID ที่ต้องการอัปเดตงานซ่อม", ticket_ids)
+    selected_id = st.selectbox(
+        "🔍 เลือก ID ที่ต้องการแก้ไข / อัปเดตข้อมูล", ticket_ids
+    )
 
     row_idx = df_data[df_data["id"] == selected_id].index[0]
     ticket = df_data.loc[row_idx]
 
-    col_info, col_form = st.columns([1, 1])
+    now_dt = get_thailand_now_dt()
 
-    with col_info:
-      st.markdown(f"### 🔍 รายละเอียดใบแจ้งซ่อม ID: **{ticket['id']}**")
-      st.write(f"**ผู้แจ้ง:** {ticket['reporter']}")
-      st.write(f"**แผนก:** {ticket['department']}")
-      st.write(f"**อุปกรณ์:** {ticket['equipment']}")
-      st.write(f"**ความเร่งด่วน:** {ticket['priority']}")
-      st.write(f"**📅 วันที่แจ้งซ่อม:** {ticket['report_date']}")
-      st.write(f"**⏰ เวลาที่แจ้งซ่อม:** {ticket['report_time']}")
+    # --- ปุ่มลบใบแจ้งซ่อม ---
+    with st.expander("⚠️ ต้องการลบใบแจ้งซ่อมนี้?"):
       st.write(
-          f"**เวลาซ่อมเสร็จล่าสุด:** {ticket['completed_at'] or 'ยังไม่เสร็จสิ้น'}"
+          f"หากต้องการลบใบแจ้งซ่อม ID **{selected_id}** ออกจากฐานข้อมูล ให้กดปุ่มด้านล่าง"
       )
-      st.info(f"**อาการเสีย:** {ticket['description']}")
+      if st.button(
+          f"🗑️ ยืนยันลบ ID {selected_id}", type="primary", key="del_btn"
+      ):
+        supabase.table("repair_requests").delete().eq(
+            "id", selected_id
+        ).execute()
+        st.success(f"🗑️ ลบใบแจ้งซ่อม ID {selected_id} เรียบร้อยแล้ว!")
+        st.rerun()
 
-      st.markdown("#### 🖼️ รูปภาพประกอบ")
-      img_col1, img_col2 = st.columns(2)
+    # --- ฟอร์มแก้ไขข้อมูลทั้งหมด ---
+    with st.form(key="edit_full_form"):
+      st.markdown(f"### ✏️ แก้ไขข้อมูลใบแจ้งซ่อม ID: **{ticket['id']}**")
 
-      with img_col1:
-        st.caption("📷 **ก่อนซ่อม**")
+      # --- ส่วนที่ 1: ข้อมูลผู้แจ้งซ่อม ---
+      st.markdown("#### 1️⃣ ข้อมูลการแจ้งซ่อม (ฝั่งผู้แจ้ง)")
+      col_e1, col_e2, col_e3 = st.columns(3)
+
+      dept_options = ["สีฝุ่น", "สีน้ำมัน", "โซน 2"]
+      curr_dept = (
+          ticket["department"]
+          if ticket["department"] in dept_options
+          else dept_options[0]
+      )
+
+      prio_options = ["ปกติ", "ด่วน", "ด่วนที่สุด"]
+      curr_prio = (
+          ticket["priority"]
+          if ticket["priority"] in prio_options
+          else prio_options[0]
+      )
+
+      with col_e1:
+        reporter_edit = st.text_input(
+            "ผู้แจ้งซ่อม", value=str(ticket["reporter"] or "")
+        )
+      with col_e2:
+        department_edit = st.selectbox(
+            "แผนก / โซน",
+            dept_options,
+            index=dept_options.index(curr_dept),
+        )
+      with col_e3:
+        priority_edit = st.selectbox(
+            "ระดับความเร่งด่วน",
+            prio_options,
+            index=prio_options.index(curr_prio),
+        )
+
+      equipment_edit = st.text_input(
+          "อุปกรณ์ / สถานที่", value=str(ticket["equipment"] or "")
+      )
+      description_edit = st.text_area(
+          "อาการเสีย / รายละเอียดปัญหา",
+          value=str(ticket["description"] or ""),
+      )
+
+      st.markdown("🕒 **วันและเวลาที่แจ้งซ่อม (แก้ไขได้)**")
+      col_rd, col_rt = st.columns(2)
+
+      init_rep_date = parse_date(ticket["report_date"], now_dt.date())
+      init_rep_time = parse_time(
+          ticket["report_time"], now_dt.time().replace(microsecond=0)
+      )
+
+      with col_rd:
+        report_date_edit = st.date_input(
+            "📅 วันที่แจ้งซ่อม", value=init_rep_date
+        )
+      with col_rt:
+        report_time_edit = st.time_input(
+            "⏰ เวลาที่แจ้งซ่อม", value=init_rep_time
+        )
+
+      col_img1, col_img2 = st.columns(2)
+      with col_img1:
+        st.caption("📷 รูปถ่ายก่อนซ่อมปัจจุบัน")
         img_b = base64_to_image(ticket["image_before"])
         if img_b:
-          st.image(img_b, use_container_width=True)
+          st.image(img_b, width=200)
         else:
           st.text("ไม่มีรูปก่อนซ่อม")
+        uploaded_before_edit = st.file_uploader(
+            "เปลี่ยนรูปถ่ายก่อนซ่อม",
+            type=["jpg", "png", "jpeg"],
+            key="up_before",
+        )
 
-      with img_col2:
-        st.caption("✅ **หลังซ่อมเสร็จ**")
+      st.markdown("---")
+
+      # --- ส่วนที่ 2: ข้อมูลงานซ่อมของช่าง ---
+      st.markdown("#### 2️⃣ การดำเนินงานของช่าง (ฝั่งผู้ซ่อม)")
+
+      status_list = ["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"]
+      curr_status = (
+          ticket["status"] if ticket["status"] in status_list else "รอดำเนินการ"
+      )
+
+      col_t1, col_t2 = st.columns(2)
+      with col_t1:
+        new_status = st.selectbox(
+            "สถานะการซ่อม",
+            status_list,
+            index=status_list.index(curr_status),
+        )
+      with col_t2:
+        technician_name = st.text_input(
+            "ช่างผู้รับผิดชอบ", value=str(ticket["technician"] or "")
+        )
+
+      cause_input = st.text_area(
+          "สาเหตุการชำรุด", value=str(ticket["cause"] or "")
+      )
+      solution_input = st.text_area(
+          "วิธีแก้ไข", value=str(ticket["solution"] or "")
+      )
+
+      col_p1, col_p2 = st.columns(2)
+      with col_p1:
+        parts_used = st.text_input(
+            "อะไหล่ที่ใช้", value=str(ticket["parts_used"] or "")
+        )
+      with col_p2:
+        parts_qty = st.text_input(
+            "จำนวนอะไหล่", value=str(ticket["parts_qty"] or "")
+        )
+
+      st.markdown("🕒 **วันและเวลาที่ซ่อมเสร็จ (แก้ไขได้)**")
+
+      init_comp_date = parse_date(ticket["completed_date"], now_dt.date())
+      init_comp_time = parse_time(
+          ticket["completed_time"], now_dt.time().replace(microsecond=0)
+      )
+
+      col_cd, col_ct = st.columns(2)
+      with col_cd:
+        completed_date_edit = st.date_input(
+            "📅 วันที่ซ่อมเสร็จ", value=init_comp_date
+        )
+      with col_ct:
+        completed_time_edit = st.time_input(
+            "⏰ เวลาที่ซ่อมเสร็จ", value=init_comp_time
+        )
+
+      with col_img2:
+        st.caption("✅ รูปถ่ายหลังซ่อมปัจจุบัน")
         img_a = base64_to_image(ticket["image_after"])
         if img_a:
-          st.image(img_a, use_container_width=True)
+          st.image(img_a, width=200)
         else:
-          st.text("ยังไม่ได้แนบรูปหลังซ่อม")
-
-    with col_form:
-      st.markdown("### 🛠️ บันทึกการซ่อมของช่าง")
-      with st.form(key="tech_form"):
-        status_list = ["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"]
-        curr_status = (
-            ticket["status"] if ticket["status"] in status_list else "รอดำเนินการ"
-        )
-        curr_idx = status_list.index(curr_status)
-
-        new_status = st.selectbox("สถานะการซ่อม", status_list, index=curr_idx)
-        technician_name = st.text_input(
-            "ชื่อผู้ซ่อม / ช่างผู้รับผิดชอบ", value=str(ticket["technician"] or "")
+          st.text("ไม่มีรูปหลังซ่อม")
+        uploaded_after_edit = st.file_uploader(
+            "เปลี่ยนรูปถ่ายหลังซ่อม",
+            type=["jpg", "png", "jpeg"],
+            key="up_after",
         )
 
-        cause_input = st.text_area(
-            "สาเหตุของอาการเสีย / จุดที่ชำรุด", value=str(ticket["cause"] or "")
+      save_btn = st.form_submit_button(
+          "💾 บันทึกการแก้ไขข้อมูลทั้งหมด", type="primary"
+      )
+
+      if save_btn:
+        # การจัดการรูปภาพก่อนซ่อม
+        img_before_b64 = ticket["image_before"]
+        if uploaded_before_edit is not None:
+          img_before_b64 = compress_and_to_base64(uploaded_before_edit.read())
+
+        # การจัดการรูปภาพหลังซ่อม
+        img_after_b64 = ticket["image_after"]
+        if uploaded_after_edit is not None:
+          img_after_b64 = compress_and_to_base64(uploaded_after_edit.read())
+
+        # คำนวณ ISO Timestamp วันที่แจ้ง
+        created_at_str = f"{report_date_edit} {report_time_edit.strftime('%H:%M:%S')}+07:00"
+
+        # คำนวณ ISO Timestamp วันที่เสร็จ
+        comp_date_str = None
+        comp_time_str = None
+        comp_at_str = None
+
+        if new_status == "เสร็จสิ้น":
+          comp_date_str = str(completed_date_edit)
+          comp_time_str = completed_time_edit.strftime("%H:%M:%S")
+          comp_at_str = f"{comp_date_str} {comp_time_str}+07:00"
+
+        update_data = {
+            "reporter": reporter_edit,
+            "department": department_edit,
+            "equipment": equipment_edit,
+            "description": description_edit,
+            "priority": priority_edit,
+            "report_date": str(report_date_edit),
+            "report_time": report_time_edit.strftime("%H:%M:%S"),
+            "created_at": created_at_str,
+            "image_before": img_before_b64,
+            "status": new_status,
+            "technician": technician_name,
+            "cause": cause_input,
+            "solution": solution_input,
+            "parts_used": parts_used,
+            "parts_qty": parts_qty,
+            "completed_date": comp_date_str,
+            "completed_time": comp_time_str,
+            "completed_at": comp_at_str,
+            "image_after": img_after_b64,
+        }
+
+        supabase.table("repair_requests").update(update_data).eq(
+            "id", selected_id
+        ).execute()
+        st.success(
+            f"✅ แก้ไขข้อมูลใบแจ้งซ่อม ID {selected_id} และอัปเดตลง Supabase เรียบร้อยแล้ว!"
         )
-        solution_input = st.text_area(
-            "วิธีแก้ไข / ดำเนินการซ่อม", value=str(ticket["solution"] or "")
-        )
-
-        parts_used = st.text_input(
-            "อะไหล่ที่ใช้ (เช่น น็อต M6, สายไฟ)",
-            value=str(ticket["parts_used"] or ""),
-        )
-        parts_qty = st.text_input(
-            "จำนวนอะไหล่ (เช่น 2 ตัว, 1 เมตร)",
-            value=str(ticket["parts_qty"] or ""),
-        )
-
-        st.markdown("---")
-        st.markdown("🕒 **ระบุวันและเวลาที่ซ่อมเสร็จ**")
-
-        default_dt = get_thailand_now_dt()
-        if ticket["completed_at"]:
-          try:
-            default_dt = datetime.fromisoformat(
-                str(ticket["completed_at"]).replace("Z", "+00:00")
-            )
-          except Exception:
-            pass
-
-        col_d, col_t = st.columns(2)
-        with col_d:
-          completed_date = st.date_input(
-              "📅 วันที่ซ่อมเสร็จ", value=default_dt.date()
-          )
-        with col_t:
-          completed_time = st.time_input(
-              "⏰ เวลาที่ซ่อมเสร็จ",
-              value=default_dt.time().replace(microsecond=0),
-          )
-
-        uploaded_after = st.file_uploader(
-            "📷 แนบรูปถ่ายหลังซ่อมเสร็จ", type=["jpg", "png", "jpeg"]
-        )
-
-        save_btn = st.form_submit_button("💾 บันทึกข้อมูลงานซ่อม")
-
-        if save_btn:
-          img_after_b64 = ticket["image_after"]
-          if uploaded_after is not None:
-            img_after_b64 = compress_and_to_base64(uploaded_after.read())
-
-          comp_date_str = None
-          comp_time_str = None
-          comp_at_str = None
-
-          if new_status == "เสร็จสิ้น":
-            comp_date_str = str(completed_date)
-            comp_time_str = completed_time.strftime("%H:%M:%S")
-            comp_at_str = f"{comp_date_str} {comp_time_str}+07:00"
-
-          update_data = {
-              "status": new_status,
-              "technician": technician_name,
-              "cause": cause_input,
-              "solution": solution_input,
-              "parts_used": parts_used,
-              "parts_qty": parts_qty,
-              "completed_date": comp_date_str,
-              "completed_time": comp_time_str,
-              "completed_at": comp_at_str,
-              "image_after": img_after_b64,
-          }
-
-          supabase.table("repair_requests").update(update_data).eq(
-              "id", selected_id
-          ).execute()
-          st.success(
-              f"✅ บันทึกข้อมูลงานซ่อม ID {selected_id} ลง Supabase เรียบร้อยแล้ว!"
-          )
-          st.rerun()
+        st.rerun()
 
   else:
     st.info("ยังไม่มีข้อมูลการแจ้งซ่อมในระบบ")
