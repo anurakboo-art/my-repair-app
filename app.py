@@ -6,8 +6,8 @@ from PIL import Image
 import plotly.express as px
 import streamlit as st
 
-# --- 1. ตั้งค่าฐานข้อมูล SQLite (เพิ่มคอลัมน์ image_after) ---
-conn = sqlite3.connect("repair_system_v4.db", check_same_thread=False)
+# --- 1. ตั้งค่าฐานข้อมูล SQLite (เพิ่มคอลัมน์ department) ---
+conn = sqlite3.connect("repair_system_v5.db", check_same_thread=False)
 c = conn.cursor()
 
 c.execute(
@@ -15,6 +15,7 @@ c.execute(
 CREATE TABLE IF NOT EXISTS repair_tickets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     reporter TEXT NOT NULL,
+    department TEXT NOT NULL,
     equipment TEXT NOT NULL,
     description TEXT NOT NULL,
     priority TEXT NOT NULL,
@@ -25,7 +26,7 @@ CREATE TABLE IF NOT EXISTS repair_tickets (
     parts_used TEXT,
     parts_qty TEXT,
     completed_at TEXT,
-    image_after BLOB -- เพิ่มคอลัมน์เก็บรูปหลังซ่อม
+    image_after BLOB
 )
 """
 )
@@ -33,10 +34,10 @@ conn.commit()
 
 # --- 2. ตั้งค่าหน้าตาแอป Streamlit ---
 st.set_page_config(
-    page_title="ระบบแจ้งซ่อมและบันทึกผลงาน", page_icon="🛠️", layout="wide"
+    page_title="ระบบแจ้งซ่อมแยกตามแผนก", page_icon="🛠️", layout="wide"
 )
 
-st.title("🛠️ ระบบแจ้งซ่อม บันทึกผลงาน (ก่อน/หลังซ่อม) และรายงาน")
+st.title("🛠️ ระบบแจ้งซ่อม บันทึกผลงาน (แบ่งตามแผนก) และรายงาน")
 
 tab1, tab2, tab3 = st.tabs(
     [
@@ -52,15 +53,20 @@ tab1, tab2, tab3 = st.tabs(
 with tab1:
     st.subheader("กรอกข้อมูลการแจ้งซ่อม")
     with st.form(key="repair_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             reporter = st.text_input("ชื่อผู้แจ้ง *")
-            equipment = st.text_input("อุปกรณ์ / สถานที่ ที่ต้องการแจ้งซ่อม *")
         with col2:
+            # เพิ่มตัวเลือกแผนกตามที่ต้องการ
+            department = st.selectbox(
+                "เลือกแผนก / โซน *", ["สีฝุ่น", "สีน้ำมัน", "โซน 2"]
+            )
+        with col3:
             priority = st.selectbox(
                 "ระดับความเร่งด่วน", ["ปกติ", "ด่วน", "ด่วนที่สุด"]
             )
 
+        equipment = st.text_input("อุปกรณ์ / สถานที่ ที่ต้องการแจ้งซ่อม *")
         description = st.text_area("รายละเอียดปัญหาอาการเสีย *")
         uploaded_file = st.file_uploader(
             "📷 แนบรูปภาพอุปกรณ์เสียก่อนซ่อม (ถ้ามี)",
@@ -70,7 +76,7 @@ with tab1:
         submit_button = st.form_submit_button(label="ส่งข้อมูลแจ้งซ่อม")
 
         if submit_button:
-            if reporter and equipment and description:
+            if reporter and department and equipment and description:
                 image_bytes = None
                 if uploaded_file is not None:
                     image_bytes = uploaded_file.read()
@@ -78,11 +84,12 @@ with tab1:
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 c.execute(
                     """
-                    INSERT INTO repair_tickets (reporter, equipment, description, priority, status, created_at, image)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO repair_tickets (reporter, department, equipment, description, priority, status, created_at, image)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         reporter,
+                        department,
                         equipment,
                         description,
                         priority,
@@ -110,7 +117,7 @@ with tab2:
         df_all = pd.read_sql_query(
             """
             SELECT 
-                id AS 'ID', reporter AS 'ผู้แจ้ง', equipment AS 'อุปกรณ์', 
+                id AS 'ID', reporter AS 'ผู้แจ้ง', department AS 'แผนก', equipment AS 'อุปกรณ์', 
                 priority AS 'ความเร่งด่วน', status AS 'สถานะ', 
                 technician AS 'ผู้ซ่อม', parts_used AS 'อะไหล่ที่ใช้', 
                 parts_qty AS 'จำนวน', created_at AS 'เวลาแจ้ง', completed_at AS 'เวลาซ่อมเสร็จ'
@@ -131,8 +138,8 @@ with tab2:
         ticket = c.fetchone()
 
         if ticket:
-            # โครงสร้างตาราง:
-            # (0:id, 1:reporter, 2:equipment, 3:description, 4:priority, 5:status, 6:created_at, 7:image, 8:technician, 9:parts_used, 10:parts_qty, 11:completed_at, 12:image_after)
+            # โครงสร้างคอลัมน์:
+            # (0:id, 1:reporter, 2:department, 3:equipment, 4:description, 5:priority, 6:status, 7:created_at, 8:image, 9:technician, 10:parts_used, 11:parts_qty, 12:completed_at, 13:image_after)
 
             col_info, col_form = st.columns([1, 1])
 
@@ -141,10 +148,11 @@ with tab2:
                     f"### 🔍 รายละเอียดใบแจ้งซ่อม ID: **{ticket[0]}**"
                 )
                 st.write(f"**ผู้แจ้ง:** {ticket[1]}")
-                st.write(f"**อุปกรณ์:** {ticket[2]}")
-                st.write(f"**ความเร่งด่วน:** {ticket[4]}")
-                st.write(f"**เวลาแจ้ง:** {ticket[6]}")
-                st.info(f"**อาการเสีย:** {ticket[3]}")
+                st.write(f"**แผนก:** {ticket[2]}")
+                st.write(f"**อุปกรณ์:** {ticket[3]}")
+                st.write(f"**ความเร่งด่วน:** {ticket[5]}")
+                st.write(f"**เวลาแจ้ง:** {ticket[7]}")
+                st.info(f"**อาการเสีย:** {ticket[4]}")
 
                 # แสดงเปรียบเทียบรูปก่อนซ่อมและหลังซ่อม
                 st.markdown("#### 🖼️ เปรียบเทียบรูปภาพก่อน-หลังซ่อม")
@@ -152,16 +160,16 @@ with tab2:
 
                 with img_col1:
                     st.caption("📷 **ก่อนซ่อม**")
-                    if ticket[7]:
-                        img_before = Image.open(io.BytesIO(ticket[7]))
+                    if ticket[8]:
+                        img_before = Image.open(io.BytesIO(ticket[8]))
                         st.image(img_before, use_container_width=True)
                     else:
                         st.text("ไม่มีรูปก่อนซ่อม")
 
                 with img_col2:
                     st.caption("✅ **หลังซ่อมเสร็จ**")
-                    if ticket[12]:
-                        img_after = Image.open(io.BytesIO(ticket[12]))
+                    if ticket[13]:
+                        img_after = Image.open(io.BytesIO(ticket[13]))
                         st.image(img_after, use_container_width=True)
                     else:
                         st.text("ยังไม่ได้แนบรูปหลังซ่อม")
@@ -176,8 +184,8 @@ with tab2:
                         "ยกเลิก",
                     ]
                     curr_status_idx = (
-                        status_list.index(ticket[5])
-                        if ticket[5] in status_list
+                        status_list.index(ticket[6])
+                        if ticket[6] in status_list
                         else 0
                     )
 
@@ -185,15 +193,15 @@ with tab2:
                         "สถานะการซ่อม", status_list, index=curr_status_idx
                     )
                     technician_name = st.text_input(
-                        "ชื่อผู้ซ่อม / ช่างผู้รับผิดชอบ", value=ticket[8] or ""
+                        "ชื่อผู้ซ่อม / ช่างผู้รับผิดชอบ", value=ticket[9] or ""
                     )
                     parts_used = st.text_input(
                         "อะไหล่ที่ใช้ (เช่น น็อต M6, สายไฟ)",
-                        value=ticket[9] or "",
+                        value=ticket[10] or "",
                     )
                     parts_qty = st.text_input(
                         "จำนวนอะไหล่ (เช่น 2 ตัว, 1 เมตร)",
-                        value=ticket[10] or "",
+                        value=ticket[11] or "",
                     )
 
                     # อัปโหลดรูปหลังซ่อม
@@ -205,13 +213,11 @@ with tab2:
                     save_btn = st.form_submit_button("💾 บันทึกข้อมูลงานซ่อม")
 
                     if save_btn:
-                        # จัดการรูปหลังซ่อม
-                        image_after_bytes = ticket[12]  # ใช้รูปเดิมถ้าไม่มีการอัปโหลดใหม่
+                        image_after_bytes = ticket[13]
                         if uploaded_after is not None:
                             image_after_bytes = uploaded_after.read()
 
-                        # บันทึกเวลาซ่อมเสร็จอัตโนมัติเมื่อเลือกสถานะ 'เสร็จสิ้น'
-                        completed_time = ticket[11]
+                        completed_time = ticket[12]
                         if new_status == "เสร็จสิ้น" and not completed_time:
                             completed_time = datetime.now().strftime(
                                 "%Y-%m-%d %H:%M:%S"
@@ -268,10 +274,11 @@ with tab3:
 
         st.markdown("---")
 
-        col_g1, col_g2 = st.columns(2)
+        # กราฟ 3 แท่ง/รูปวงกลม
+        col_g1, col_g2, col_g3 = st.columns(3)
 
         with col_g1:
-            st.markdown("### 🗓️ สถิติการแจ้งซ่อมรายเดือน")
+            st.markdown("### 🗓️ รายเดือน (ตามสถานะ)")
             monthly_summary = (
                 df_stats.groupby(["YearMonth", "status"])
                 .size()
@@ -283,14 +290,30 @@ with tab3:
                 x="YearMonth",
                 y="จำนวนงาน",
                 color="status",
-                title="จำนวนใบแจ้งซ่อมในแต่ละเดือน (แยกตามสถานะ)",
-                labels={"YearMonth": "เดือน (ปี-เดือน)", "จำนวนงาน": "จำนวนรายการ"},
+                title="ใบแจ้งซ่อมในแต่ละเดือน",
+                labels={"YearMonth": "เดือน", "จำนวนงาน": "รายการ"},
                 barmode="stack",
             )
             st.plotly_chart(fig_bar, use_container_width=True)
 
         with col_g2:
-            st.markdown("### 🚨 สัดส่วนความเร่งด่วนของงานซ่อม")
+            st.markdown("### 🏢 สถิติแยกตามแผนก")
+            dept_summary = (
+                df_stats.groupby("department").size().reset_index(name="จำนวนงาน")
+            )
+
+            fig_dept = px.bar(
+                dept_summary,
+                x="department",
+                y="จำนวนงาน",
+                color="department",
+                title="จำนวนใบแจ้งซ่อมแยกตามแผนก",
+                labels={"department": "แผนก", "จำนวนงาน": "รายการ"},
+            )
+            st.plotly_chart(fig_dept, use_container_width=True)
+
+        with col_g3:
+            st.markdown("### 🚨 สัดส่วนความเร่งด่วน")
             priority_summary = (
                 df_stats.groupby("priority").size().reset_index(name="จำนวนงาน")
             )
@@ -315,6 +338,8 @@ with tab3:
         completed_df = df_stats[df_stats["technician"].notna()][
             [
                 "id",
+                "reporter",
+                "department",
                 "equipment",
                 "technician",
                 "parts_used",
@@ -324,13 +349,14 @@ with tab3:
             ]
         ].copy()
 
-        # เช็กว่ารายการไหนมีรูปหลังซ่อมบ้าง
         completed_df["รูปหลังซ่อม"] = df_stats["image_after"].apply(
             lambda x: "✅ มีรูป" if x is not None else "❌ ไม่มี"
         )
 
         completed_df.columns = [
             "ID",
+            "ผู้แจ้ง",
+            "แผนก",
             "อุปกรณ์",
             "ช่างผู้ซ่อม",
             "อะไหล่ที่ใช้",
