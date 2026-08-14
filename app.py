@@ -336,7 +336,6 @@ with tab2:
       st.markdown("#### 1️⃣ ข้อมูลการแจ้งซ่อม (ฝั่งผู้แจ้ง)")
       col_e1, col_e2, col_e3 = st.columns(3)
 
-      # จัดการตัวเลือกแผนกสำหรับหน้าแก้ไข
       curr_ticket_dept = str(ticket["department"] or "").strip()
       edit_dept_base = sorted(list(set(all_departments + [curr_ticket_dept])))
       if "" in edit_dept_base:
@@ -557,12 +556,13 @@ with tab3:
   if not df_data.empty:
     df_stats = df_data.copy()
 
+    # แก้ไขการจัดการ Timezone ให้เปรียบเทียบและลบกันได้โดยไม่มีปัญหา TypeError
     df_stats["created_at_dt"] = pd.to_datetime(
-        df_stats["created_at"], errors="coerce"
-    )
+        df_stats["created_at"], errors="coerce", utc=True
+    ).dt.tz_convert("Asia/Bangkok")
     df_stats["completed_at_dt"] = pd.to_datetime(
-        df_stats["completed_at"], errors="coerce"
-    )
+        df_stats["completed_at"], errors="coerce", utc=True
+    ).dt.tz_convert("Asia/Bangkok")
 
     df_stats["duration"] = (
         df_stats["completed_at_dt"] - df_stats["created_at_dt"]
