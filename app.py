@@ -45,6 +45,19 @@ def format_timedelta(td):
   return " ".join(parts)
 
 
+def style_status(val):
+  """ฟังก์ชันใส่สีพื้นหลังให้ช่องสถานะ"""
+  if val == "เสร็จสิ้น":
+    return "background-color: #d4edda; color: #155724; font-weight: bold;"  # สีเขียว
+  elif val == "รอดำเนินการ":
+    return "background-color: #fff3cd; color: #856404; font-weight: bold;"  # สีเหลือง
+  elif val == "ยกเลิก":
+    return "background-color: #f8d7da; color: #721c24; font-weight: bold;"  # สีแดง
+  elif val == "กำลังดำเนินการ":
+    return "background-color: #cce5ff; color: #004085; font-weight: bold;"  # สีฟ้า
+  return ""
+
+
 # --- 1. ตั้งค่าฐานข้อมูล SQLite ---
 conn = sqlite3.connect("repair_system_v6.db", check_same_thread=False)
 c = conn.cursor()
@@ -160,7 +173,14 @@ with tab2:
         """,
         conn,
     )
-    st.dataframe(df_all, use_container_width=True)
+
+    # ตกแต่งสีในช่อง "สถานะ" ของตาราง
+    try:
+      styled_df = df_all.style.map(style_status, subset=["สถานะ"])
+    except AttributeError:
+      styled_df = df_all.style.applymap(style_status, subset=["สถานะ"])
+
+    st.dataframe(styled_df, use_container_width=True)
 
     st.markdown("---")
 
@@ -359,21 +379,19 @@ with tab3:
     col_g1, col_g2, col_g3 = st.columns(3)
 
     with col_g1:
-      # เพิ่ม Selectbox เลือกรูปแบบช่วงเวลา
       period_type = st.selectbox(
           "🗓️ เลือกมุมมองช่วงเวลาของกราฟ",
           ["รายวัน", "รายสัปดาห์", "รายเดือน", "รายปี"],
-          index=2,  # ค่าเริ่มต้นคือ รายเดือน
+          index=2,
       )
 
-      # แปลงฟอร์แมตวันที่ตามที่เลือก
       if period_type == "รายวัน":
         df_stats["Period"] = df_stats["created_at_dt"].dt.strftime("%Y-%m-%d")
       elif period_type == "รายสัปดาห์":
         df_stats["Period"] = df_stats["created_at_dt"].dt.strftime("%Y-W%U")
       elif period_type == "รายเดือน":
         df_stats["Period"] = df_stats["created_at_dt"].dt.strftime("%Y-%m")
-      else:  # รายปี
+      else:
         df_stats["Period"] = df_stats["created_at_dt"].dt.strftime("%Y")
 
       summary_by_period = (
@@ -389,6 +407,12 @@ with tab3:
           color="status",
           title=f"สถิติใบแจ้งซ่อม ({period_type})",
           labels={"Period": f"ช่วงเวลา ({period_type})", "จำนวนงาน": "รายการ"},
+          color_discrete_map={
+              "เสร็จสิ้น": "#28a745",
+              "รอดำเนินการ": "#ffc107",
+              "ยกเลิก": "#dc3545",
+              "กำลังดำเนินการ": "#17a2b8",
+          },
           barmode="stack",
           text_auto=True,
       )
@@ -443,6 +467,7 @@ with tab3:
             "reporter",
             "department",
             "equipment",
+            "status",
             "technician",
             "cause",
             "solution",
@@ -466,6 +491,7 @@ with tab3:
         "reporter",
         "department",
         "equipment",
+        "status",
         "technician",
         "cause",
         "solution",
@@ -482,6 +508,7 @@ with tab3:
         "ผู้แจ้ง",
         "แผนก",
         "อุปกรณ์",
+        "สถานะ",
         "ช่างผู้ซ่อม",
         "สาเหตุ",
         "วิธีแก้ไข",
@@ -493,7 +520,16 @@ with tab3:
         "สถานะรูปหลังซ่อม",
     ]
 
-    st.dataframe(completed_df_display, use_container_width=True)
+    try:
+      styled_report_df = completed_df_display.style.map(
+          style_status, subset=["สถานะ"]
+      )
+    except AttributeError:
+      styled_report_df = completed_df_display.style.applymap(
+          style_status, subset=["สถานะ"]
+      )
+
+    st.dataframe(styled_report_df, use_container_width=True)
 
     # --- ปุ่มสำหรับดาวน์โหลดไฟล์ Excel / CSV ---
     st.markdown("#### 📥 ดาวน์โหลดรายงาน")
