@@ -101,7 +101,7 @@ st.set_page_config(
     page_title="ใบแจ้งซ่อม-บันทึกการซ่อม", page_icon="🛠️", layout="wide"
 )
 
-st.title("🛠️ ใบแจ้งซ่อม & บันทึกงาน PM")
+st.title("🛠️ ใบแจ้งซ่อม & บันทึกงาน PM (แผนกช่าง)")
 
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
@@ -109,6 +109,7 @@ supabase = create_client(url, key)
 
 COLUMN_NAMES = [
     "id",
+    "ticket_no",
     "reporter",
     "job_type",
     "department",
@@ -142,17 +143,33 @@ def load_data():
     )
     data = response.data
     if not data:
-      return pd.DataFrame(columns=COLUMN_NAMES)
+      df = pd.DataFrame(columns=COLUMN_NAMES)
+      return df
     df = pd.DataFrame(data)
     for col in COLUMN_NAMES:
       if col not in df.columns:
         df[col] = ""
 
     df["job_type"] = df["job_type"].replace("", "แจ้งซ่อม").fillna("แจ้งซ่อม")
+
+    # หากไม่มีเลขที่ใบแจ้งซ่อม ให้แสดงค่าสำรองอ้างอิงจาก ID
+    def fill_ticket_no(row):
+      t_no = str(row.get("ticket_no", "") or "").strip()
+      if t_no:
+        return t_no
+      try:
+        val = int(row["id"])
+        return f"REP-{val:04d}"
+      except Exception:
+        return f"REP-{row['id']}"
+
+    df["ticket_no"] = df.apply(fill_ticket_no, axis=1)
+
     return df
   except Exception as e:
     st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูล: {e}")
-    return pd.DataFrame(columns=COLUMN_NAMES)
+    df = pd.DataFrame(columns=COLUMN_NAMES)
+    return df
 
 
 df_data = load_data()
@@ -179,16 +196,26 @@ tab1, tab2, tab3 = st.tabs([
 # ==========================================
 with tab1:
   st.subheader("กรอกข้อมูลการแจ้งซ่อม / งาน PM ใหม่")
+
+  if "success_msg" in st.session_state:
+    st.success(st.session_state.pop("success_msg"))
+
   with st.form(key="repair_form", clear_on_submit=True):
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
-      reporter = st.text_input("ชื่อผู้แจ้ง *")
+      ticket_no = st.text_input(
+          "เลขที่ใบแจ้งซ่อม *", placeholder="เช่น REP-0001 หรือ JOB-69"
+      )
 
     with col2:
-      job_type = st.selectbox("ประเภทงาน *", ["แจ้งซ่อม", "PM"])
+      reporter = st.text_input("ชื่อผู้แจ้ง *")
 
     with col3:
+      job_type = st.selectbox("ประเภทงาน *", ["แจ้งซ่อม", "PM"])
+
+    col4, col5, col6 = st.columns(3)
+    with col4:
       dept_options = all_departments + ["➕ พิมพ์ระบุแผนกใหม่..."]
       dept_choice = st.selectbox("เลือกแผนก / โซน *", dept_options)
       if dept_choice == "➕ พิมพ์ระบุแผนกใหม่...":
@@ -196,12 +223,14 @@ with tab1:
       else:
         department = dept_choice
 
-    with col4:
+    with col5:
       priority = st.selectbox(
           "ระดับความเร่งด่วน", ["ปกติ", "ด่วน", "ด่วนที่สุด"]
       )
 
-    equipment = st.text_input("อุปกรณ์ / เครื่องจักร / สถานที่ *")
+    with col6:
+      equipment = st.text_input("อุปกรณ์ / เครื่องจักร / สถานที่ *")
+
     description = st.text_area("รายละเอียดปัญหาอาการเสีย / รายการ PM *")
 
     st.markdown("🕒 **วันและเวลาที่เกิดเหตุ / บันทึกงาน**")
@@ -222,7 +251,7 @@ with tab1:
     submit_button = st.form_submit_button(label="ส่งข้อมูลบันทึกงาน")
 
     if submit_button:
-      if reporter and department and equipment and description:
+      if ticket_no and reporter and department and equipment and description:
         image_b64 = ""
         if uploaded_file is not None:
           image_b64 = compress_and_to_base64(uploaded_file.read())
@@ -232,6 +261,7 @@ with tab1:
         )
 
         new_data = {
+            "ticket_no": ticket_no.strip(),
             "reporter": reporter,
             "job_type": job_type,
             "department": department.strip(),
@@ -251,16 +281,17 @@ with tab1:
             "image_after": "",
         }
 
-        # ส่งข้อมูลเข้า Supabase พร้อมดักจับข้อผิดพลาด
         try:
-          res = supabase.table("repair_requests").insert(new_data).execute()
-          st.success("✅ บันทึกข้อมูลเรียบร้อยแล้ว!")
+          supabase.table("repair_requests").insert(new_data).execute()
+          st.session_state["success_msg"] = (
+              f"✅ บันทึกข้อมูลเรียบร้อยแล้ว! เลขที่ใบแจ้งซ่อม:"
+              f" **{ticket_no.strip()}**"
+          )
           st.rerun()
         except Exception as e:
           st.error(
-              f"❌ ไม่สามารถบันทึกข้อมูลได้ กรุณาตรวจสอบว่ามีคอลัมน์ 'job_type' ใน Supabase หรือไม่ (ข้อความแจ้งเตือน: {e})"
+              f"❌ ไม่สามารถบันทึกข้อมูลได้ กรุณาตรวจสอบว่ามีคอลัมน์ 'ticket_no' ใน Supabase หรือยัง (ข้อความแจ้งเตือน: {e})"
           )
-
       else:
         st.warning("⚠️ กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบถ้วน")
 
@@ -268,13 +299,13 @@ with tab1:
 # --- Tab 2: จัดการ / แก้ไขงาน ---
 # ==========================================
 with tab2:
-  st.subheader("🛠️ แก้ไขและอัปเดตข้อมูลงานซ่อม / PM")
+  st.subheader("🛠️ แก้ไขและอัปเดตข้อมูลงานซ่อม / PM (สำหรับช่าง)")
 
   if not df_data.empty:
     df_display = df_data.copy()
 
     display_cols = [
-        "id",
+        "ticket_no",
         "reporter",
         "job_type",
         "department",
@@ -292,7 +323,7 @@ with tab2:
 
     df_show = df_display[display_cols].copy()
     df_show.columns = [
-        "ID",
+        "เลขที่ใบแจ้งซ่อม",
         "ผู้แจ้ง",
         "ประเภทงาน",
         "แผนก",
@@ -316,9 +347,18 @@ with tab2:
     st.dataframe(styled_df, use_container_width=True)
     st.markdown("---")
 
-    ticket_ids = df_data["id"].tolist()
+    ticket_options = {
+        row["id"]: (
+            f"{row['ticket_no']} | {row['job_type']} - แผนก {row['department']}"
+            f" | อุปกรณ์: {row['equipment']} ({row['status']})"
+        )
+        for _, row in df_data.iterrows()
+    }
+
     selected_id = st.selectbox(
-        "🔍 เลือก ID ที่ต้องการแก้ไข / อัปเดตข้อมูล", ticket_ids
+        "🔍 เลือกใบแจ้งซ่อมที่ต้องการแก้ไข / อัปเดตข้อมูล",
+        options=list(ticket_options.keys()),
+        format_func=lambda x: ticket_options[x],
     )
 
     row_idx = df_data[df_data["id"] == selected_id].index[0]
@@ -326,27 +366,30 @@ with tab2:
 
     now_dt = get_thailand_now_dt()
 
-    with st.expander("⚠️ ต้องการลบรายการนี้?"):
+    with st.expander("⚠️ ต้องการลบใบแจ้งซ่อมนี้?"):
       st.write(
-          f"หากต้องการลบรายการ ID **{selected_id}** ออกจากฐานข้อมูล ให้กดปุ่มด้านล่าง"
+          f"หากต้องการลบใบแจ้งซ่อม **{ticket['ticket_no']}** ออกจากฐานข้อมูล"
+          " ให้กดปุ่มด้านล่าง"
       )
       if st.button(
-          f"🗑️ ยืนยันลบ ID {selected_id}", type="primary", key="del_btn"
+          f"🗑️ ยืนยันลบ {ticket['ticket_no']}", type="primary", key="del_btn"
       ):
         try:
           supabase.table("repair_requests").delete().eq(
               "id", selected_id
           ).execute()
-          st.success(f"🗑️ ลบรายการ ID {selected_id} เรียบร้อยแล้ว!")
+          st.success(f"🗑️ ลบรายการ {ticket['ticket_no']} เรียบร้อยแล้ว!")
           st.rerun()
         except Exception as e:
           st.error(f"❌ เกิดข้อผิดพลาดในการลบ: {e}")
 
     with st.form(key="edit_full_form"):
-      st.markdown(f"### ✏️ แก้ไขข้อมูลรายการ ID: **{ticket['id']}**")
+      st.markdown(
+          f"### ✏️ แก้ไขข้อมูลใบแจ้งซ่อม เลขที่: **{ticket['ticket_no']}**"
+      )
 
       st.markdown("#### 1️⃣ ข้อมูลการแจ้ง (ฝั่งผู้แจ้ง)")
-      col_e1, col_e2, col_e3, col_e4 = st.columns(4)
+      col_e0, col_e1, col_e2, col_e3, col_e4 = st.columns(5)
 
       job_type_list = ["แจ้งซ่อม", "PM"]
       curr_job_type = (
@@ -373,6 +416,11 @@ with tab2:
           if ticket["priority"] in prio_options
           else prio_options[0]
       )
+
+      with col_e0:
+        ticket_no_edit = st.text_input(
+            "เลขที่ใบแจ้งซ่อม", value=str(ticket["ticket_no"] or "")
+        )
 
       with col_e1:
         reporter_edit = st.text_input(
@@ -521,6 +569,7 @@ with tab2:
         created_at_str = f"{report_date_edit} {report_time_edit.strftime('%H:%M:%S')}+07:00"
 
         update_data = {
+            "ticket_no": ticket_no_edit.strip(),
             "reporter": reporter_edit,
             "job_type": job_type_edit,
             "department": department_edit.strip(),
@@ -552,7 +601,7 @@ with tab2:
               "id", selected_id
           ).execute()
           st.success(
-              f"✅ แก้ไขข้อมูลรายการ ID {selected_id} เรียบร้อยแล้ว!"
+              f"✅ แก้ไขข้อมูลใบแจ้งซ่อม {ticket_no_edit} เรียบร้อยแล้ว!"
           )
           st.rerun()
         except Exception as e:
@@ -720,7 +769,7 @@ with tab3:
     )
 
     report_cols = [
-        "id",
+        "ticket_no",
         "reporter",
         "job_type",
         "department",
@@ -741,7 +790,7 @@ with tab3:
 
     completed_df_display = df_stats[report_cols].copy()
     completed_df_display.columns = [
-        "ID",
+        "เลขที่ใบแจ้งซ่อม",
         "ผู้แจ้ง",
         "ประเภทงาน",
         "แผนก",
