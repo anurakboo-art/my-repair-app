@@ -309,7 +309,6 @@ with tab1:
                     image_b64 = compress_multiple_to_json(uploaded_images_b) if uploaded_images_b else ""
                     created_at_str = datetime.combine(report_date, report_time).replace(tzinfo=THAILAND_TZ).isoformat()
                     
-                    # บันทึกเฉพาะข้อมูลฝั่งผู้แจ้งเท่านั้น (ไม่ส่งฟิลด์รับงานที่ยังว่างอยู่)
                     new_data = {
                         "ticket_no": ticket_no.strip(),
                         "reporter": reporter,
@@ -593,7 +592,9 @@ with tab3:
         st.info("ยังไม่มีข้อมูลสำหรับสรุปรายงาน")
     else:
         df_stats = df.copy()
+        now_date = get_thailand_now_dt().date()
         
+        # คำนวณระยะเวลาซ่อม (สำหรับงานที่เสร็จแล้ว)
         def calc_repair_time(row):
             if row["status"] == "เสร็จสิ้น" and pd.notna(row.get("completed_date")):
                 try:
@@ -617,11 +618,13 @@ with tab3:
         df_stats["repair_duration"] = df_stats.apply(calc_repair_time, axis=1)
         df_stats["ระยะเวลาซ่อมรวม"] = df_stats["repair_duration"].apply(format_timedelta)
         
+        # คำนวณยอดสรุป
         total_jobs = len(df_stats)
+        done_jobs = len(df_stats[df_stats["status"] == "เสร็จสิ้น"])
         pending_jobs = len(df_stats[df_stats["status"] == "รอดำเนินการ"])
         in_prog_jobs = len(df_stats[df_stats["status"] == "กำลังดำเนินการ"])
-        done_jobs = len(df_stats[df_stats["status"] == "เสร็จสิ้น"])
         cancel_jobs = len(df_stats[df_stats["status"] == "ยกเลิก"])
+        outstanding_jobs = pending_jobs + in_prog_jobs  # งานค้างสะสมทั้งหมด (ติดอยู่)
         
         valid_durations = df_stats["repair_duration"].dropna()
         avg_duration_str = "-"
@@ -629,33 +632,99 @@ with tab3:
             avg_td = valid_durations.mean()
             avg_duration_str = format_timedelta(avg_td)
             
+        # 1. กล่องแสดงตัวเลขสรุป (Metrics)
         m1, m2, m3, m4, m5, m6 = st.columns(6)
-        m1.metric("งานทั้งหมด", f"{total_jobs} งาน")
-        m2.metric("⏳ รอดำเนินการ", f"{pending_jobs} งาน")
-        m3.metric("🔄 กำลังซ่อม", f"{in_prog_jobs} งาน")
-        m4.metric("✅ เสร็จสิ้น", f"{done_jobs} งาน")
-        m5.metric("❌ ยกเลิก", f"{cancel_jobs} งาน")
+        m1.metric("📋 งานทั้งหมด", f"{total_jobs} งาน")
+        m2.metric("✅ เสร็จสิ้นแล้ว", f"{done_jobs} งาน")
+        m3.metric("⚠️ งานค้างสะสม (ติดอยู่)", f"{outstanding_jobs} งาน")
+        m4.metric("⏳ รอดำเนินการ", f"{pending_jobs} งาน")
+        m5.metric("🔄 กำลังซ่อม", f"{in_prog_jobs} งาน")
         m6.metric("⏱️ เวลาซ่อมเฉลี่ย", avg_duration_str)
         
         st.markdown("---")
         
-        col_g1, col_g2, col_g3 = st.columns(3)
+        # 2. กราฟวิเคราะห์ข้อมูล
+        col_g1, col_g2 = st.columns(2)
         
         with col_g1:
-            st.markdown("##### 📌 สัดส่วนตามสถานะงาน")
+            st.markdown("##### 🕒 กราฟงานค้างสะสมแยกตามอายุงาน (ยังไม่เสร็จ)")
+            # กรองเอาเฉพาะงานค้าง (รอดำเนินการ + กำลังดำเนินการ)
+            df_pending = df_stats[df_stats["status"].isin(["รอดำเนินการ", "กำลังดำเนินการ"])].copy()
+            
+            if df_pending.empty:
+                st.success("🎉 ไม่มีงานค้างสะสมในระบบ!")
+            else:
+                def calc_age_days(r_date_val):
+                    try:
+                        r_date = pd.to_datetime(r_date_val).date()
+                        return (now_date - r_date).days
+                    except Exception:
+                        return 0
+                        
+                df_pending["age_days"] = df_pending["report_date"].apply(calc_age_days)
+                
+                def categorize_age(days):
+                    if days < 7:
+                        return "1. น้อยกว่า 7 วัน"
+                    elif 7 <= days <= 15:
+                        return "2. 7 - 15 วัน"
+                    elif 16 <= days <= 30:
+                        return "3. 16 - 30 วัน"
+                    else:
+                        return "4. มากกว่า 1 เดือน"
+                        
+                df_pending["age_group"] = df_pending["age_days"].apply(categorize_age)
+                
+                # จัดเรียงลำดับอายุงานให้ถูกต้อง
+                age_order = ["1. น้อยกว่า 7 วัน", "2. 7 - 15 วัน", "3. 16 - 30 วัน", "4. มากกว่า 1 เดือน"]
+                age_counts = df_pending["age_group"].value_counts().reindex(age_order, fill_value=0).reset_index()
+                age_counts.columns = ["อายุงานค้าง", "จำนวนงาน"]
+                
+                age_display_map = {
+                    "1. น้อยกว่า 7 วัน": "< 7 วัน",
+                    "2. 7 - 15 วัน": "7 - 15 วัน",
+                    "3. 16 - 30 วัน": "16 - 30 วัน",
+                    "4. มากกว่า 1 เดือน": "> 1 เดือน"
+                }
+                age_counts["ช่วงอายุงาน"] = age_counts["อายุงานค้าง"].map(age_display_map)
+                
+                color_map = {
+                    "< 7 วัน": "#2ecc71",     # เขียว
+                    "7 - 15 วัน": "#f1c40f",   # เหลือง
+                    "16 - 30 วัน": "#e67e22",  # ส้ม
+                    "> 1 เดือน": "#e74c3c"    # แดง
+                }
+                
+                fig_aging = px.bar(
+                    age_counts, 
+                    x="ช่วงอายุงาน", 
+                    y="จำนวนงาน", 
+                    text="จำนวนงาน",
+                    color="ช่วงอายุงาน",
+                    color_discrete_map=color_map,
+                    title=f"รวมงานค้างทั้งหมด {len(df_pending)} รายการ"
+                )
+                fig_aging.update_traces(textposition='outside')
+                fig_aging.update_layout(showlegend=False, yaxis_title="จำนวนใบแจ้งซ่อม", xaxis_title="อายุงานค้าง")
+                st.plotly_chart(fig_aging, use_container_width=True)
+                
+        with col_g2:
+            st.markdown("##### 📌 สัดส่วนตามสถานะงานทั้งหมด")
             status_counts = df_stats["status"].value_counts().reset_index()
             status_counts.columns = ["สถานะ", "จำนวน"]
             fig_status = px.pie(status_counts, names="สถานะ", values="จำนวน", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig_status, use_container_width=True)
-            
-        with col_g2:
+
+        col_g3, col_g4 = st.columns(2)
+        
+        with col_g3:
             st.markdown("##### 🚨 สัดส่วนระดับความเร่งด่วน")
             prio_counts = df_stats["priority"].value_counts().reset_index()
             prio_counts.columns = ["ความเร่งด่วน", "จำนวน"]
             fig_prio = px.bar(prio_counts, x="ความเร่งด่วน", y="จำนวน", color="ความเร่งด่วน", color_discrete_sequence=px.colors.qualitative.Set2)
             st.plotly_chart(fig_prio, use_container_width=True)
             
-        with col_g3:
+        with col_g4:
             st.markdown("##### 🏢 จำนวนงานแยกตามแผนก")
             dept_counts = df_stats["department"].value_counts().reset_index()
             dept_counts.columns = ["แผนก", "จำนวน"]
