@@ -145,7 +145,8 @@ def style_status(val):
         return "background-color: #cce5ff; color: #004085; font-weight: bold;"
     return ""
 
-DEFAULT_DEPTS = ["ฝ่ายผลิต", "ฝ่ายซ่อมบำรุง", "ฝ่ายคลังสินค้า", "ฝ่ายไอที", "ฝ่ายบุคคล/สำนักงาน"]
+# กำหนดแผนก / โซน เริ่มต้น
+DEFAULT_DEPTS = ["สีฝุ่น", "สีน้ำมัน", "โซน 2"]
 
 COLUMN_NAMES = [
     "id", "ticket_no", "reporter", "job_type", "department", "equipment", 
@@ -219,7 +220,7 @@ with tab1:
     default_ticket_no = generate_default_ticket_no(df)
     
     existing_depts = df["department"].dropna().unique().tolist() if not df.empty and "department" in df.columns else []
-    all_depts = sorted(list(set(DEFAULT_DEPTS + existing_depts)))
+    all_depts = list(dict.fromkeys(DEFAULT_DEPTS + [d for d in existing_depts if d]))
     dept_options = all_depts + ["➕ พิมพ์ระบุแผนกใหม่..."]
     
     with st.form("repair_form", clear_on_submit=True):
