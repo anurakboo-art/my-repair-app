@@ -1367,3 +1367,96 @@ with tab3:
                     display_image_gallery(wo_detail.get("image_before", ""), title="📸 รูปถ่ายก่อนซ่อม (Before)")
                 with col_img_a:
                     display_image_gallery(wo_detail.get("image_after", ""), title="📸 รูปถ่ายหลังซ่อมเสร็จ (After)")
+
+# ==========================================
+            # 📌 ส่วนตารางรายการงานล่าสุด (Work Order List & Drill-down)
+            # ==========================================
+            st.markdown("---")
+            st.markdown("### 📋 ตารางรายการงานซ่อมล่าสุด (Work Order List Table)")
+            st.caption("คลิกเลือกรายการจากตารางหรือตัวเลือกด้านล่าง เพื่อ Drill-down ดูรายละเอียดงานฉบับเต็มได้ทันที")
+
+            if not df_stats.empty:
+                # ดึง 10 รายการล่าสุด (เรียงจากล่าสุดไปเก่าสุด)
+                df_recent = df_stats.tail(10).iloc[::-1].copy()
+
+                # เลือกคอลัมน์ที่ต้องการแสดงในตารางตามข้อกำหนด
+                recent_cols = ["ticket_no", "reporter", "equipment", "status", "technician"]
+                df_recent_display = df_recent[recent_cols].copy()
+                df_recent_display.columns = [
+                    "เลขที่ใบแจ้งซ่อม (Ticket)", 
+                    "ชื่อผู้แจ้ง", 
+                    "อุปกรณ์ / เครื่องจักร", 
+                    "สถานะ", 
+                    "ช่างผู้รับผิดชอบ"
+                ]
+
+                # รองรับการเลือก Row จาก dataframe เพื่อ Drill-down
+                selected_ticket_from_table = None
+                try:
+                    selected_rows = st.dataframe(
+                        apply_status_style(df_recent_display),
+                        use_container_width=True,
+                        selection_mode="single-row",
+                        on_select="rerun",
+                        key="recent_work_orders_table"
+                    )
+                    if selected_rows and hasattr(selected_rows, "selection") and selected_rows.selection.get("rows"):
+                        sel_idx = selected_rows.selection["rows"][0]
+                        selected_ticket_from_table = df_recent_display.iloc[sel_idx]["เลขที่ใบแจ้งซ่อม (Ticket)"]
+                except Exception:
+                    # กรณี Streamlit เวอร์ชั่นเก่าที่ยังไม่รองรับ on_select="rerun"
+                    st.dataframe(apply_status_style(df_recent_display), use_container_width=True)
+
+                # ตัวเลือก Dropdown สำหรับ Drill-down
+                recent_tickets_list = df_recent["ticket_no"].tolist()
+                default_idx = 0
+                if selected_ticket_from_table and selected_ticket_from_table in recent_tickets_list:
+                    default_idx = recent_tickets_list.index(selected_ticket_from_table)
+
+                col_sel1, _ = st.columns([2, 1])
+                with col_sel1:
+                    selected_dd_ticket = st.selectbox(
+                        "🔍 เลือกใบแจ้งซ่อมเพื่อดูรายละเอียด (Drill-down):",
+                        options=recent_tickets_list,
+                        index=default_idx,
+                        key="dd_selectbox_recent_work_orders"
+                    )
+
+                # แสดงการ Drill-down รายละเอียดงาน
+                if selected_dd_ticket:
+                    t_detail = df_recent[df_recent["ticket_no"] == selected_dd_ticket].iloc[0]
+                    
+                    with st.expander(f"🔎 รายละเอียด Drill-down: ใบแจ้งซ่อม {t_detail['ticket_no']} [{t_detail['status']}]", expanded=True):
+                        # การจัดเลย์เอาต์ข้อมูลเป็น 3 คอลัมน์
+                        col_d1, col_d2, col_d3 = st.columns(3)
+                        with col_d1:
+                            st.markdown(f"**เลขที่ใบแจ้งซ่อม:** `{t_detail.get('ticket_no', '-')}`")
+                            st.markdown(f"**ชื่อผู้แจ้ง:** {t_detail.get('reporter', '-')}")
+                            st.markdown(f"**ประเภทงาน:** {t_detail.get('job_type', '-')}")
+                            st.markdown(f"**แผนก / โซน:** {t_detail.get('department', '-')}")
+                        with col_d2:
+                            st.markdown(f"**อุปกรณ์/เครื่องจักร:** {t_detail.get('equipment', '-')}")
+                            st.markdown(f"**ระดับความเร่งด่วน:** {t_detail.get('priority', '-')}")
+                            st.markdown(f"**สถานะปัจจุบัน:** `{t_detail.get('status', '-')}`")
+                            st.markdown(f"**วันที่แจ้งซ่อม:** {t_detail.get('report_date', '-')} {t_detail.get('report_time', '')}")
+                        with col_d3:
+                            st.markdown(f"**เลขที่รับงาน:** {t_detail.get('received_no', '-')}")
+                            st.markdown(f"**ช่างผู้รับผิดชอบ:** {t_detail.get('technician', '-')}")
+                            st.markdown(f"**วันที่เสร็จสิ้น:** {t_detail.get('completed_date', '-')} {t_detail.get('completed_time', '')}")
+                            st.markdown(f"**ระยะเวลาซ่อมรวม:** {t_detail.get('ระยะเวลาซ่อมรวม', '-')}")
+
+                        st.markdown("---")
+                        st.markdown(f"**📌 อาการเสีย / รายละเอียดงาน:** {t_detail.get('description', '-')}")
+                        st.markdown(f"**🔍 สาเหตุของปัญหา:** {t_detail.get('cause', '-')}")
+                        st.markdown(f"**🛠️ วิธีการแก้ไข / ผลงาน:** {t_detail.get('solution', '-')}")
+                        st.markdown(f"**🧩 อะไหล่ที่ใช้:** {t_detail.get('parts_used', '-')} (จำนวน: {t_detail.get('parts_qty', '-')})")
+
+                        # แสดงรูปภาพก่อน-หลังซ่อม
+                        st.markdown("---")
+                        col_img1, col_img2 = st.columns(2)
+                        with col_img1:
+                            display_image_gallery(t_detail.get("image_before", ""), title="📸 รูปถ่ายก่อนซ่อม (Before)")
+                        with col_img2:
+                            display_image_gallery(t_detail.get("image_after", ""), title="📸 รูปถ่ายหลังซ่อม (After)")
+            else:
+                st.info("ยังไม่มีข้อมูลรายการงานซ่อมในระบบ")
