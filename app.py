@@ -310,6 +310,7 @@ with tab2:
         "job_type",
         "department",
         "equipment",
+        "description",
         "priority",
         "status",
         "report_date",
@@ -328,6 +329,7 @@ with tab2:
         "ประเภทงาน",
         "แผนก",
         "อุปกรณ์",
+        "อาการเสีย/รายละเอียด",
         "ความเร่งด่วน",
         "สถานะ",
         "วันที่แจ้ง",
@@ -768,12 +770,14 @@ with tab3:
         lambda x: "✅ มีรูป" if str(x).strip() != "" else "❌ ไม่มี"
     )
 
+    # เพิ่ม description เข้าไปในคอลัมน์รายงาน
     report_cols = [
         "ticket_no",
         "reporter",
         "job_type",
         "department",
         "equipment",
+        "description",
         "status",
         "report_date",
         "report_time",
@@ -795,6 +799,7 @@ with tab3:
         "ประเภทงาน",
         "แผนก",
         "อุปกรณ์",
+        "อาการเสีย / รายละเอียด",
         "สถานะ",
         "วันที่แจ้ง",
         "เวลาแจ้ง",
