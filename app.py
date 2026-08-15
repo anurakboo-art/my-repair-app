@@ -308,7 +308,6 @@ with tab1:
                     st.error(f"❌ เลขที่ใบแจ้งซ่อม '{ticket_no.strip()}' มีในระบบแล้ว กรุณาใช้เลขอื่น")
                 else:
                     image_b64 = compress_multiple_to_json(uploaded_images_b) if uploaded_images_b else ""
-                    # 📌 แก้ไขจุดนี้: ใช้ .replace(tzinfo=THAILAND_TZ) เพื่อให้เวลาตรงกับที่ผู้ใช้กรอก
                     created_at_str = datetime.combine(report_date, report_time).replace(tzinfo=THAILAND_TZ).isoformat()
                     
                     new_data = {
@@ -353,7 +352,7 @@ with tab2:
     else:
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            status_filter = st.multiselect("กรองตามสถานะ", options=["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ"])
+            status_filter = st.multiselect("กรองตามสถานะ", options=["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ", "ยกเลิก"])
         with col_f2:
             search_kw = st.text_input("🔍 ค้นหา (เลขใบแจ้งซ่อม / เลขที่รับ / ชื่อผู้แจ้ง / อุปกรณ์)", "")
             
@@ -395,7 +394,7 @@ with tab2:
         if not ticket_list:
             st.warning("ไม่มีรายการตรงตามเงื่อนไขที่เลือก")
         else:
-            selected_ticket_no = st.selectbox("เลือกเลขที่ใบแจ้งซ่อมเพื่ออัปเดต:", ticket_list)
+            selected_ticket_no = st.selectbox("เลือกเลขที่ใบแจ้งซ่อมเพื่อจัดการ:", ticket_list)
             ticket = df[df["ticket_no"] == selected_ticket_no].iloc[0]
             
             with st.form("update_form"):
@@ -481,17 +480,18 @@ with tab2:
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
+                # 📌 สถานะงาน: ช่างสามารถเลือก "ยกเลิก" ได้ที่นี่
                 status_options = ["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"]
                 curr_status = str(ticket["status"] or "รอดำเนินการ")
                 status_idx = status_options.index(curr_status) if curr_status in status_options else 0
                 
                 col_u1, col_u2 = st.columns(2)
                 with col_u1:
-                    new_status = st.selectbox("สถานะงาน *", status_options, index=status_idx)
+                    new_status = st.selectbox("สถานะงาน (เลือก 'ยกเลิก' เพื่อยกเลิกงาน) *", status_options, index=status_idx)
                 with col_u2:
                     technician_name = st.text_input("ชื่อผู้ซ่อม / ช่างผู้รับผิดชอบ", value=str(ticket.get("technician", "") or ""))
                 
-                cause_input = st.text_area("สาเหตุของปัญหา", value=str(ticket.get("cause", "") or ""), height=70)
+                cause_input = st.text_area("สาเหตุของปัญหา / เหตุผลที่ยกเลิก", value=str(ticket.get("cause", "") or ""), height=70)
                 solution_input = st.text_area("วิธีแก้ไข / การดำเนินการ", value=str(ticket.get("solution", "") or ""), height=70)
                 
                 col_p1, col_p2 = st.columns(2)
@@ -521,7 +521,7 @@ with tab2:
                     key="edit_img_a"
                 )
                 
-                update_submitted = st.form_submit_button("💾 บันทึกการอัปเดต", use_container_width=True)
+                update_submitted = st.form_submit_button("💾 บันทึกการอัปเดต / ยกเลิกงาน", use_container_width=True)
                 
                 if update_submitted:
                     if not supabase:
@@ -579,10 +579,23 @@ with tab2:
                         
                         try:
                             supabase.table("tickets").update(update_data).eq("id", ticket["id"]).execute()
-                            st.success(f"✅ อัปเดตข้อมูลใบแจ้งซ่อม **{ticket_no_edit}** เรียบร้อยแล้ว!")
+                            st.success(f"✅ อัปเดตข้อมูลใบแจ้งซ่อม **{ticket_no_edit}** เรียบร้อยแล้ว (สถานะ: {new_status})!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
+
+            # 📌 ส่วนที่เพิ่มตามคำขอ: โซนสำหรับลบใบแจ้งซ่อมถาวรออกจากฐานข้อมูล
+            st.markdown("<br>", unsafe_allow_html=True)
+            with st.expander("🚨 โซนอันตราย: ลบใบแจ้งซ่อมนี้ออกจากระบบถาวร"):
+                st.warning(f"⚠️ คำเตือน: การลบใบแจ้งซ่อมเลขที่ **{ticket['ticket_no']}** จะลบข้อมูลออกจากระบบอย่างถาวร ไม่สามารถกู้คืนได้")
+                confirm_delete = st.checkbox(f"ยืนยันต้องการลบใบแจ้งซ่อม {ticket['ticket_no']} ถาวร", key=f"del_chk_{ticket['id']}")
+                if st.button("🗑️ ยืนยันลบข้อมูลออกจากฐานข้อมูล", disabled=not confirm_delete, type="primary", use_container_width=True):
+                    try:
+                        supabase.table("tickets").delete().eq("id", ticket["id"]).execute()
+                        st.success(f"🗑️ ลบใบแจ้งซ่อม **{ticket['ticket_no']}** ออกจากระบบเรียบร้อยแล้ว")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"เกิดข้อผิดพลาดในการลบข้อมูล: {e}")
 
 # =============================================================
 # TAB 3: รายงาน & สถิติ
