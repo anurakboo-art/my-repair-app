@@ -309,6 +309,7 @@ with tab1:
                     image_b64 = compress_multiple_to_json(uploaded_images_b) if uploaded_images_b else ""
                     created_at_str = datetime.combine(report_date, report_time).replace(tzinfo=THAILAND_TZ).isoformat()
                     
+                    # บันทึกเฉพาะข้อมูลฝั่งผู้แจ้งเท่านั้น (ไม่ส่งฟิลด์รับงานที่ยังว่างอยู่)
                     new_data = {
                         "ticket_no": ticket_no.strip(),
                         "reporter": reporter,
@@ -321,16 +322,7 @@ with tab1:
                         "report_date": str(report_date),
                         "report_time": report_time.strftime("%H:%M:%S"),
                         "created_at": created_at_str,
-                        "image_before": image_b64,
-                        "received_no": "",
-                        "received_date": "",
-                        "received_time": "",
-                        "technician": "",
-                        "cause": "",
-                        "solution": "",
-                        "parts_used": "",
-                        "parts_qty": "",
-                        "image_after": ""
+                        "image_before": image_b64
                     }
                     
                     try:
@@ -544,7 +536,6 @@ with tab2:
                             
                         created_at_str = datetime.combine(report_date_edit, report_time_edit).replace(tzinfo=THAILAND_TZ).isoformat()
                         
-                        # ตัด received_at ออกเรียบร้อยเพื่อแก้ปัญหา PGRST204
                         update_data = {
                             "ticket_no": ticket_no_edit.strip(),
                             "reporter": reporter_edit,
