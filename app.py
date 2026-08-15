@@ -799,15 +799,31 @@ with tab3:
                     
                     for i, p_line in enumerate(p_lines):
                         clean_part = re.sub(r'^\d+[\.\)]\s*|^[-\*]\s*', '', p_line).strip()
-                        qty_val = ""
+                        qty_val_raw = ""
                         if i < len(q_lines):
-                            qty_val = re.sub(r'^\d+[\.\)]\s*|^[-\*]\s*', '', q_lines[i]).strip()
+                            qty_val_raw = re.sub(r'^\d+[\.\)]\s*|^[-\*]\s*', '', q_lines[i]).strip()
+                        
+                        # ดึงเฉพาะตัวเลขจำนวน และ หน่วย ออกจากข้อความ
+                        num_val = 1.0
+                        unit_str = ""
+                        if qty_val_raw and qty_val_raw != "-":
+                            match = re.search(r'(\d+(?:\.\d+)?)', qty_val_raw)
+                            if match:
+                                try:
+                                    num_val = float(match.group(1))
+                                except ValueError:
+                                    num_val = 1.0
+                                unit_str = re.sub(r'\d+(?:\.\d+)?', '', qty_val_raw).strip()
+                            else:
+                                unit_str = qty_val_raw.strip()
                         
                         if clean_part:
                             items.append({
                                 "ticket_no": row.get("ticket_no", ""),
                                 "อะไหล่": clean_part,
-                                "จำนวน": qty_val if qty_val else "-"
+                                "qty_num": num_val,
+                                "unit": unit_str,
+                                "raw_qty": qty_val_raw if qty_val_raw else "-"
                             })
                 return pd.DataFrame(items)
 
@@ -816,38 +832,57 @@ with tab3:
             if df_parts_parsed.empty:
                 st.info("ℹ️ ยังไม่มีข้อมูลการบันทึกใช้อะไหล่ในช่วงเวลาที่เลือก")
             else:
+                def get_unit(units_series):
+                    unique_u = [u for u in units_series if u]
+                    return unique_u[0] if unique_u else ""
+
                 parts_summary = df_parts_parsed.groupby("อะไหล่").agg(
-                    count=("อะไหล่", "count"),
-                    qty_detail=("จำนวน", lambda x: ", ".join([str(v) for v in x if str(v) != "-"] or ["-"]))
+                    total_qty=("qty_num", "sum"),
+                    unit=("unit", get_unit),
+                    times_used=("อะไหล่", "count")
                 ).reset_index()
+
+                def format_qty_display(row):
+                    q = row["total_qty"]
+                    q_str = f"{int(q)}" if q.is_integer() else f"{q:.2f}"
+                    if row["unit"]:
+                        return f"{q_str} {row['unit']}"
+                    return f"{q_str}"
+
+                parts_summary["จำนวนที่ใช้งาน"] = parts_summary["total_qty"]
+                parts_summary["จำนวนที่ใช้งาน (ระบุหน่วย)"] = parts_summary.apply(format_qty_display, axis=1)
+                parts_summary = parts_summary.sort_values(by="total_qty", ascending=False)
                 
-                parts_summary = parts_summary.sort_values(by="count", ascending=False)
-                parts_summary.columns = ["รายการอะไหล่ / อุปกรณ์", "จำนวนที่ใช้ (งาน)", "รายละเอียดจำนวน/หน่วย ที่บันทึก"]
+                parts_summary_display = parts_summary[["อะไหล่", "จำนวนที่ใช้งาน (ระบุหน่วย)", "times_used"]].copy()
+                parts_summary_display.columns = ["รายการอะไหล่ / อุปกรณ์", "จำนวนที่ใช้งาน", "จำนวนครั้งที่ซ่อม (งาน)"]
                 
+                total_parts_sum = parts_summary["total_qty"].sum()
+                total_parts_sum_str = f"{int(total_parts_sum)}" if total_parts_sum.is_integer() else f"{total_parts_sum:.2f}"
+
                 col_pmetric1, col_pmetric2 = st.columns(2)
                 col_pmetric1.metric("📦 ประเภทอะไหล่ที่ถูกใช้งาน", f"{len(parts_summary)} ชนิด")
-                col_pmetric2.metric("📋 รวมรายการเบิกใช้อะไหล่ทั้งหมด", f"{len(df_parts_parsed)} รายการ")
+                col_pmetric2.metric("🔢 รวมจำนวนอะไหล่ที่เบิกใช้ทั้งหมด", f"{total_parts_sum_str} ชิ้น/หน่วย")
                 
                 col_pchart, col_ptable = st.columns([1, 1])
                 with col_pchart:
-                    st.markdown("##### 📊 10 อันดับอะไหล่ที่ถูกใช้มากที่สุด")
-                    top10_parts = parts_summary.head(10).sort_values(by="จำนวนครั้งที่ใช้ (งาน)", ascending=True)
+                    st.markdown("##### 📊 10 อันดับอะไหล่ที่ใช้จำนวนมากที่สุด")
+                    top10_parts = parts_summary.head(10).sort_values(by="total_qty", ascending=True)
                     fig_parts = px.bar(
                         top10_parts,
-                        x="จำนวนที่ใช้ (งาน)",
-                        y="รายการอะไหล่ / อุปกรณ์",
+                        x="total_qty",
+                        y="อะไหล่",
                         orientation="h",
-                        text="จำนวนที่ใช้ (งาน)",
-                        color="จำนวนครั้งที่ใช้ (งาน)",
+                        text="จำนวนที่ใช้งาน (ระบุหน่วย)",
+                        color="total_qty",
                         color_continuous_scale="Viridis"
                     )
                     fig_parts.update_traces(textposition="outside")
-                    fig_parts.update_layout(showlegend=False, coloraxis_showscale=False, yaxis_title="")
+                    fig_parts.update_layout(showlegend=False, coloraxis_showscale=False, yaxis_title="", xaxis_title="จำนวนที่ใช้งาน")
                     st.plotly_chart(fig_parts, use_container_width=True)
                     
                 with col_ptable:
-                    st.markdown("##### 📋 ตารางรายละเอียดสรุปการใช้อะไหล่")
-                    st.dataframe(parts_summary, use_container_width=True, hide_index=True)
+                    st.markdown("##### 📋 ตารางรายละเอียดสรุปจำนวนการใช้อะไหล่")
+                    st.dataframe(parts_summary_display, use_container_width=True, hide_index=True)
                 
             st.markdown("---")
             st.markdown("### 📄 ตารางรายงานสรุปงานซ่อม (เรียงตามวันที่แจ้ง)")
