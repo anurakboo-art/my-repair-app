@@ -594,182 +594,222 @@ with tab3:
         df_stats = df.copy()
         now_date = get_thailand_now_dt().date()
         
-        # คำนวณระยะเวลาซ่อม (สำหรับงานที่เสร็จแล้ว)
-        def calc_repair_time(row):
-            if row["status"] == "เสร็จสิ้น" and pd.notna(row.get("completed_date")):
-                try:
-                    s_date = row['received_date'] if pd.notna(row.get('received_date')) and str(row.get('received_date')).strip() != "" else row['report_date']
-                    s_time = row['received_time'] if pd.notna(row.get('received_time')) and str(row.get('received_time')).strip() != "" else row['report_time']
-                    
-                    if pd.isna(s_date) or str(s_date).strip() == "":
-                        return None
-                        
-                    s_time_str = str(s_time).strip() if pd.notna(s_time) and str(s_time).strip() != "" else "00:00:00"
-                    c_time_str = str(row['completed_time']).strip() if pd.notna(row['completed_time']) and str(row['completed_time']).strip() != "" else "00:00:00"
-                    
-                    start_dt = pd.to_datetime(f"{s_date} {s_time_str[:8]}")
-                    end_dt = pd.to_datetime(f"{row['completed_date']} {c_time_str[:8]}")
-                    if end_dt >= start_dt:
-                        return end_dt - start_dt
-                except Exception:
-                    return None
-            return None
-            
-        df_stats["repair_duration"] = df_stats.apply(calc_repair_time, axis=1)
-        df_stats["ระยะเวลาซ่อมรวม"] = df_stats["repair_duration"].apply(format_timedelta)
-        
-        # คำนวณยอดสรุป
-        total_jobs = len(df_stats)
-        done_jobs = len(df_stats[df_stats["status"] == "เสร็จสิ้น"])
-        pending_jobs = len(df_stats[df_stats["status"] == "รอดำเนินการ"])
-        in_prog_jobs = len(df_stats[df_stats["status"] == "กำลังดำเนินการ"])
-        cancel_jobs = len(df_stats[df_stats["status"] == "ยกเลิก"])
-        outstanding_jobs = pending_jobs + in_prog_jobs  # งานค้างสะสมทั้งหมด (ติดอยู่)
-        
-        valid_durations = df_stats["repair_duration"].dropna()
-        avg_duration_str = "-"
-        if not valid_durations.empty:
-            avg_td = valid_durations.mean()
-            avg_duration_str = format_timedelta(avg_td)
-            
-        # 1. กล่องแสดงตัวเลขสรุป (Metrics)
-        m1, m2, m3, m4, m5, m6 = st.columns(6)
-        m1.metric("📋 งานทั้งหมด", f"{total_jobs} งาน")
-        m2.metric("✅ เสร็จสิ้นแล้ว", f"{done_jobs} งาน")
-        m3.metric("⚠️ งานค้างสะสม (ติดอยู่)", f"{outstanding_jobs} งาน")
-        m4.metric("⏳ รอดำเนินการ", f"{pending_jobs} งาน")
-        m5.metric("🔄 กำลังซ่อม", f"{in_prog_jobs} งาน")
-        m6.metric("⏱️ เวลาซ่อมเฉลี่ย", avg_duration_str)
-        
-        st.markdown("---")
-        
-        # 2. กราฟวิเคราะห์ข้อมูล
-        col_g1, col_g2 = st.columns(2)
-        
-        with col_g1:
-            st.markdown("##### 🕒 กราฟงานค้างสะสมแยกตามอายุงาน (ยังไม่เสร็จ)")
-            # กรองเอาเฉพาะงานค้าง (รอดำเนินการ + กำลังดำเนินการ)
-            df_pending = df_stats[df_stats["status"].isin(["รอดำเนินการ", "กำลังดำเนินการ"])].copy()
-            
-            if df_pending.empty:
-                st.success("🎉 ไม่มีงานค้างสะสมในระบบ!")
-            else:
-                def calc_age_days(r_date_val):
-                    try:
-                        r_date = pd.to_datetime(r_date_val).date()
-                        return (now_date - r_date).days
-                    except Exception:
-                        return 0
-                        
-                df_pending["age_days"] = df_pending["report_date"].apply(calc_age_days)
-                
-                def categorize_age(days):
-                    if days < 7:
-                        return "1. น้อยกว่า 7 วัน"
-                    elif 7 <= days <= 15:
-                        return "2. 7 - 15 วัน"
-                    elif 16 <= days <= 30:
-                        return "3. 16 - 30 วัน"
-                    else:
-                        return "4. มากกว่า 1 เดือน"
-                        
-                df_pending["age_group"] = df_pending["age_days"].apply(categorize_age)
-                
-                # จัดเรียงลำดับอายุงานให้ถูกต้อง
-                age_order = ["1. น้อยกว่า 7 วัน", "2. 7 - 15 วัน", "3. 16 - 30 วัน", "4. มากกว่า 1 เดือน"]
-                age_counts = df_pending["age_group"].value_counts().reindex(age_order, fill_value=0).reset_index()
-                age_counts.columns = ["อายุงานค้าง", "จำนวนงาน"]
-                
-                age_display_map = {
-                    "1. น้อยกว่า 7 วัน": "< 7 วัน",
-                    "2. 7 - 15 วัน": "7 - 15 วัน",
-                    "3. 16 - 30 วัน": "16 - 30 วัน",
-                    "4. มากกว่า 1 เดือน": "> 1 เดือน"
-                }
-                age_counts["ช่วงอายุงาน"] = age_counts["อายุงานค้าง"].map(age_display_map)
-                
-                color_map = {
-                    "< 7 วัน": "#2ecc71",     # เขียว
-                    "7 - 15 วัน": "#f1c40f",   # เหลือง
-                    "16 - 30 วัน": "#e67e22",  # ส้ม
-                    "> 1 เดือน": "#e74c3c"    # แดง
-                }
-                
-                fig_aging = px.bar(
-                    age_counts, 
-                    x="ช่วงอายุงาน", 
-                    y="จำนวนงาน", 
-                    text="จำนวนงาน",
-                    color="ช่วงอายุงาน",
-                    color_discrete_map=color_map,
-                    title=f"รวมงานค้างทั้งหมด {len(df_pending)} รายการ"
-                )
-                fig_aging.update_traces(textposition='outside')
-                fig_aging.update_layout(showlegend=False, yaxis_title="จำนวนใบแจ้งซ่อม", xaxis_title="อายุงานค้าง")
-                st.plotly_chart(fig_aging, use_container_width=True)
-                
-        with col_g2:
-            st.markdown("##### 📌 สัดส่วนตามสถานะงานทั้งหมด")
-            status_counts = df_stats["status"].value_counts().reset_index()
-            status_counts.columns = ["สถานะ", "จำนวน"]
-            fig_status = px.pie(status_counts, names="สถานะ", values="จำนวน", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-            st.plotly_chart(fig_status, use_container_width=True)
-
-        col_g3, col_g4 = st.columns(2)
-        
-        with col_g3:
-            st.markdown("##### 🚨 สัดส่วนระดับความเร่งด่วน")
-            prio_counts = df_stats["priority"].value_counts().reset_index()
-            prio_counts.columns = ["ความเร่งด่วน", "จำนวน"]
-            fig_prio = px.bar(prio_counts, x="ความเร่งด่วน", y="จำนวน", color="ความเร่งด่วน", color_discrete_sequence=px.colors.qualitative.Set2)
-            st.plotly_chart(fig_prio, use_container_width=True)
-            
-        with col_g4:
-            st.markdown("##### 🏢 จำนวนงานแยกตามแผนก")
-            dept_counts = df_stats["department"].value_counts().reset_index()
-            dept_counts.columns = ["แผนก", "จำนวน"]
-            fig_dept = px.bar(
-                dept_counts, 
-                x="จำนวน", 
-                y="แผนก", 
-                orientation="h", 
-                color="แผนก",
-                color_discrete_sequence=px.colors.qualitative.Set3
+        # -------------------------------------------------------------
+        # 📅 ตัวกรองช่วงเวลา (รายสัปดาห์ / รายเดือน / รายปี / Custom)
+        # -------------------------------------------------------------
+        st.markdown("##### 📅 เลือกช่วงเวลาเพื่อดูรายงาน")
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            period_option = st.selectbox(
+                "ช่วงเวลาการดูข้อมูล",
+                [
+                    "ทั้งหมด", 
+                    "7 วันล่าสุด (รายสัปดาห์)", 
+                    "30 วันล่าสุด (รายเดือน)", 
+                    "ปีปัจจุบัน (รายปี)", 
+                    "กำหนดช่วงวันที่เอง (Custom)"
+                ]
             )
-            fig_dept.update_layout(showlegend=False)
-            st.plotly_chart(fig_dept, use_container_width=True)
             
-        st.markdown("---")
-        st.markdown("### 📄 ตารางรายงานสรุปงานซ่อม (เรียงตามวันที่แจ้ง)")
+        df_stats["parsed_rep_date"] = pd.to_datetime(df_stats["report_date"], errors="coerce").dt.date
         
-        def count_img_status(val):
-            imgs = get_image_list_from_b64(val)
-            return f"มี {len(imgs)} รูป" if imgs else "ไม่มี"
+        if period_option == "7 วันล่าสุด (รายสัปดาห์)":
+            start_date = now_date - timedelta(days=7)
+            df_stats = df_stats[(df_stats["parsed_rep_date"] >= start_date) & (df_stats["parsed_rep_date"] <= now_date)]
+        elif period_option == "30 วันล่าสุด (รายเดือน)":
+            start_date = now_date - timedelta(days=30)
+            df_stats = df_stats[(df_stats["parsed_rep_date"] >= start_date) & (df_stats["parsed_rep_date"] <= now_date)]
+        elif period_option == "ปีปัจจุบัน (รายปี)":
+            start_date = datetime(now_date.year, 1, 1).date()
+            df_stats = df_stats[(df_stats["parsed_rep_date"] >= start_date) & (df_stats["parsed_rep_date"] <= now_date)]
+        elif period_option == "กำหนดช่วงวันที่เอง (Custom)":
+            with col_t2:
+                custom_range = st.date_input(
+                    "ระบุวันที่ (เริ่มต้น - สิ้นสุด)", 
+                    value=[now_date - timedelta(days=30), now_date]
+                )
+                if isinstance(custom_range, (list, tuple)) and len(custom_range) == 2:
+                    df_stats = df_stats[(df_stats["parsed_rep_date"] >= custom_range[0]) & (df_stats["parsed_rep_date"] <= custom_range[1])]
+        
+        if df_stats.empty:
+            st.warning("⚠️ ไม่พบข้อมูลงานซ่อมซ่อมบำรุงตามช่วงเวลาที่เลือก")
+        else:
+            # คำนวณระยะเวลาซ่อม (สำหรับงานที่เสร็จแล้ว)
+            def calc_repair_time(row):
+                if row["status"] == "เสร็จสิ้น" and pd.notna(row.get("completed_date")):
+                    try:
+                        s_date = row['received_date'] if pd.notna(row.get('received_date')) and str(row.get('received_date')).strip() != "" else row['report_date']
+                        s_time = row['received_time'] if pd.notna(row.get('received_time')) and str(row.get('received_time')).strip() != "" else row['report_time']
+                        
+                        if pd.isna(s_date) or str(s_date).strip() == "":
+                            return None
+                            
+                        s_time_str = str(s_time).strip() if pd.notna(s_time) and str(s_time).strip() != "" else "00:00:00"
+                        c_time_str = str(row['completed_time']).strip() if pd.notna(row['completed_time']) and str(row['completed_time']).strip() != "" else "00:00:00"
+                        
+                        start_dt = pd.to_datetime(f"{s_date} {s_time_str[:8]}")
+                        end_dt = pd.to_datetime(f"{row['completed_date']} {c_time_str[:8]}")
+                        if end_dt >= start_dt:
+                            return end_dt - start_dt
+                    except Exception:
+                        return None
+                return None
+                
+            df_stats["repair_duration"] = df_stats.apply(calc_repair_time, axis=1)
+            df_stats["ระยะเวลาซ่อมรวม"] = df_stats["repair_duration"].apply(format_timedelta)
             
-        df_stats["รูปถ่ายก่อนซ่อม"] = df_stats["image_before"].apply(count_img_status)
-        df_stats["รูปถ่ายหลังซ่อม"] = df_stats["image_after"].apply(count_img_status)
-        
-        report_cols = [
-            "ticket_no", "received_no", "reporter", "job_type", "department", "equipment", 
-            "description", "status", "report_date", "report_time", "received_date", "received_time",
-            "technician", "cause", "solution", "parts_used", "parts_qty", "completed_date", 
-            "completed_time", "ระยะเวลาซ่อมรวม", "รูปถ่ายก่อนซ่อม", "รูปถ่ายหลังซ่อม"
-        ]
-        
-        completed_df_display = df_stats[report_cols].copy()
-        completed_df_display.columns = [
-            "เลขที่ใบแจ้งซ่อม", "เลขที่รับ", "ผู้แจ้ง", "ประเภทงาน", "แผนก", "อุปกรณ์", 
-            "อาการเสีย / รายละเอียด", "สถานะ", "วันที่แจ้ง", "เวลาแจ้ง", "วันที่รับ", "เวลาที่รับ",
-            "ช่างผู้ซ่อม", "สาเหตุ", "วิธีแก้ไข", "อะไหล่ที่ใช้", "จำนวน", "วันที่เสร็จ", 
-            "เวลาเสร็จ", "ระยะเวลาซ่อมรวม", "รูปก่อนซ่อม", "รูปหลังซ่อม"
-        ]
-        
-        st.dataframe(apply_status_style(completed_df_display), use_container_width=True)
-        
-        csv_data = completed_df_display.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="📥 ดาวน์โหลดรายงาน (CSV)",
-            data=csv_data,
-            file_name=f"repair_report_{get_thailand_now_dt().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
+            # คำนวณยอดสรุป
+            total_jobs = len(df_stats)
+            done_jobs = len(df_stats[df_stats["status"] == "เสร็จสิ้น"])
+            pending_jobs = len(df_stats[df_stats["status"] == "รอดำเนินการ"])
+            in_prog_jobs = len(df_stats[df_stats["status"] == "กำลังดำเนินการ"])
+            cancel_jobs = len(df_stats[df_stats["status"] == "ยกเลิก"])
+            outstanding_jobs = pending_jobs + in_prog_jobs  # งานค้างสะสมทั้งหมด (ติดอยู่)
+            
+            valid_durations = df_stats["repair_duration"].dropna()
+            avg_duration_str = "-"
+            if not valid_durations.empty:
+                avg_td = valid_durations.mean()
+                avg_duration_str = format_timedelta(avg_td)
+                
+            # 1. กล่องแสดงตัวเลขสรุป (Metrics)
+            m1, m2, m3, m4, m5, m6 = st.columns(6)
+            m1.metric("📋 งานทั้งหมด", f"{total_jobs} งาน")
+            m2.metric("✅ เสร็จสิ้นแล้ว", f"{done_jobs} งาน")
+            m3.metric("⚠️ งานค้างสะสม (ติดอยู่)", f"{outstanding_jobs} งาน")
+            m4.metric("⏳ รอดำเนินการ", f"{pending_jobs} งาน")
+            m5.metric("🔄 กำลังซ่อม", f"{in_prog_jobs} งาน")
+            m6.metric("⏱️ เวลาซ่อมเฉลี่ย", avg_duration_str)
+            
+            st.markdown("---")
+            
+            # 2. กราฟวิเคราะห์ข้อมูล
+            col_g1, col_g2 = st.columns(2)
+            
+            with col_g1:
+                st.markdown("##### 🕒 กราฟงานค้างสะสมแยกตามอายุงาน (ยังไม่เสร็จ)")
+                # กรองเอาเฉพาะงานค้าง (รอดำเนินการ + กำลังดำเนินการ)
+                df_pending = df_stats[df_stats["status"].isin(["รอดำเนินการ", "กำลังดำเนินการ"])].copy()
+                
+                if df_pending.empty:
+                    st.success("🎉 ไม่มีงานค้างสะสมในช่วงเวลาที่เลือก!")
+                else:
+                    def calc_age_days(r_date_val):
+                        try:
+                            r_date = pd.to_datetime(r_date_val).date()
+                            return (now_date - r_date).days
+                        except Exception:
+                            return 0
+                            
+                    df_pending["age_days"] = df_pending["report_date"].apply(calc_age_days)
+                    
+                    def categorize_age(days):
+                        if days < 7:
+                            return "1. น้อยกว่า 7 วัน"
+                        elif 7 <= days <= 15:
+                            return "2. 7 - 15 วัน"
+                        elif 16 <= days <= 30:
+                            return "3. 16 - 30 วัน"
+                        else:
+                            return "4. มากกว่า 1 เดือน"
+                            
+                    df_pending["age_group"] = df_pending["age_days"].apply(categorize_age)
+                    
+                    # จัดเรียงลำดับอายุงานให้ถูกต้อง
+                    age_order = ["1. น้อยกว่า 7 วัน", "2. 7 - 15 วัน", "3. 16 - 30 วัน", "4. มากกว่า 1 เดือน"]
+                    age_counts = df_pending["age_group"].value_counts().reindex(age_order, fill_value=0).reset_index()
+                    age_counts.columns = ["อายุงานค้าง", "จำนวนงาน"]
+                    
+                    age_display_map = {
+                        "1. น้อยกว่า 7 วัน": "< 7 วัน",
+                        "2. 7 - 15 วัน": "7 - 15 วัน",
+                        "3. 16 - 30 วัน": "16 - 30 วัน",
+                        "4. มากกว่า 1 เดือน": "> 1 เดือน"
+                    }
+                    age_counts["ช่วงอายุงาน"] = age_counts["อายุงานค้าง"].map(age_display_map)
+                    
+                    color_map = {
+                        "< 7 วัน": "#2ecc71",     # เขียว
+                        "7 - 15 วัน": "#f1c40f",   # เหลือง
+                        "16 - 30 วัน": "#e67e22",  # ส้ม
+                        "> 1 เดือน": "#e74c3c"    # แดง
+                    }
+                    
+                    fig_aging = px.bar(
+                        age_counts, 
+                        x="ช่วงอายุงาน", 
+                        y="จำนวนงาน", 
+                        text="จำนวนงาน",
+                        color="ช่วงอายุงาน",
+                        color_discrete_map=color_map,
+                        title=f"รวมงานค้างทั้งหมด {len(df_pending)} รายการ"
+                    )
+                    fig_aging.update_traces(textposition='outside')
+                    fig_aging.update_layout(showlegend=False, yaxis_title="จำนวนใบแจ้งซ่อม", xaxis_title="อายุงานค้าง")
+                    st.plotly_chart(fig_aging, use_container_width=True)
+                    
+            with col_g2:
+                st.markdown("##### 📌 สัดส่วนตามสถานะงานทั้งหมด")
+                status_counts = df_stats["status"].value_counts().reset_index()
+                status_counts.columns = ["สถานะ", "จำนวน"]
+                fig_status = px.pie(status_counts, names="สถานะ", values="จำนวน", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+                st.plotly_chart(fig_status, use_container_width=True)
+
+            col_g3, col_g4 = st.columns(2)
+            
+            with col_g3:
+                st.markdown("##### 🚨 สัดส่วนระดับความเร่งด่วน")
+                prio_counts = df_stats["priority"].value_counts().reset_index()
+                prio_counts.columns = ["ความเร่งด่วน", "จำนวน"]
+                fig_prio = px.bar(prio_counts, x="ความเร่งด่วน", y="จำนวน", color="ความเร่งด่วน", color_discrete_sequence=px.colors.qualitative.Set2)
+                st.plotly_chart(fig_prio, use_container_width=True)
+                
+            with col_g4:
+                st.markdown("##### 🏢 จำนวนงานแยกตามแผนก")
+                dept_counts = df_stats["department"].value_counts().reset_index()
+                dept_counts.columns = ["แผนก", "จำนวน"]
+                fig_dept = px.bar(
+                    dept_counts, 
+                    x="จำนวน", 
+                    y="แผนก", 
+                    orientation="h", 
+                    color="แผนก",
+                    color_discrete_sequence=px.colors.qualitative.Set3
+                )
+                fig_dept.update_layout(showlegend=False)
+                st.plotly_chart(fig_dept, use_container_width=True)
+                
+            st.markdown("---")
+            st.markdown("### 📄 ตารางรายงานสรุปงานซ่อม (เรียงตามวันที่แจ้ง)")
+            
+            def count_img_status(val):
+                imgs = get_image_list_from_b64(val)
+                return f"มี {len(imgs)} รูป" if imgs else "ไม่มี"
+                
+            df_stats["รูปถ่ายก่อนซ่อม"] = df_stats["image_before"].apply(count_img_status)
+            df_stats["รูปถ่ายหลังซ่อม"] = df_stats["image_after"].apply(count_img_status)
+            
+            report_cols = [
+                "ticket_no", "received_no", "reporter", "job_type", "department", "equipment", 
+                "description", "status", "report_date", "report_time", "received_date", "received_time",
+                "technician", "cause", "solution", "parts_used", "parts_qty", "completed_date", 
+                "completed_time", "ระยะเวลาซ่อมรวม", "รูปถ่ายก่อนซ่อม", "รูปถ่ายหลังซ่อม"
+            ]
+            
+            completed_df_display = df_stats[report_cols].copy()
+            completed_df_display.columns = [
+                "เลขที่ใบแจ้งซ่อม", "เลขที่รับ", "ผู้แจ้ง", "ประเภทงาน", "แผนก", "อุปกรณ์", 
+                "อาการเสีย / รายละเอียด", "สถานะ", "วันที่แจ้ง", "เวลาแจ้ง", "วันที่รับ", "เวลาที่รับ",
+                "ช่างผู้ซ่อม", "สาเหตุ", "วิธีแก้ไข", "อะไหล่ที่ใช้", "จำนวน", "วันที่เสร็จ", 
+                "เวลาเสร็จ", "ระยะเวลาซ่อมรวม", "รูปก่อนซ่อม", "รูปหลังซ่อม"
+            ]
+            
+            st.dataframe(apply_status_style(completed_df_display), use_container_width=True)
+            
+            csv_data = completed_df_display.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 ดาวน์โหลดรายงาน (CSV)",
+                data=csv_data,
+                file_name=f"repair_report_{get_thailand_now_dt().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
