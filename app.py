@@ -110,6 +110,7 @@ supabase = create_client(url, key)
 COLUMN_NAMES = [
     "id",
     "ticket_no",
+    "received_no",
     "reporter",
     "job_type",
     "department",
@@ -119,6 +120,8 @@ COLUMN_NAMES = [
     "status",
     "report_date",
     "report_time",
+    "received_date",
+    "received_time",
     "created_at",
     "image_before",
     "technician",
@@ -201,21 +204,26 @@ with tab1:
     st.success(st.session_state.pop("success_msg"))
 
   with st.form(key="repair_form", clear_on_submit=True):
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
       ticket_no = st.text_input(
-          "เลขที่ใบแจ้งซ่อม *", placeholder="เช่น REP-0001 หรือ JOB-69"
+          "เลขที่ใบแจ้งซ่อม *", placeholder="เช่น REP-0001"
       )
 
     with col2:
-      reporter = st.text_input("ชื่อผู้แจ้ง *")
+      received_no = st.text_input(
+          "เลขที่รับแจ้ง", placeholder="เช่น REC-0001 (ถ้ามี)"
+      )
 
     with col3:
+      reporter = st.text_input("ชื่อผู้แจ้ง *")
+
+    with col4:
       job_type = st.selectbox("ประเภทงาน *", ["แจ้งซ่อม", "PM"])
 
-    col4, col5, col6 = st.columns(3)
-    with col4:
+    col5, col6, col7 = st.columns(3)
+    with col5:
       dept_options = all_departments + ["➕ พิมพ์ระบุแผนกใหม่..."]
       dept_choice = st.selectbox("เลือกแผนก / โซน *", dept_options)
       if dept_choice == "➕ พิมพ์ระบุแผนกใหม่...":
@@ -223,24 +231,30 @@ with tab1:
       else:
         department = dept_choice
 
-    with col5:
+    with col6:
       priority = st.selectbox(
           "ระดับความเร่งด่วน", ["ปกติ", "ด่วน", "ด่วนที่สุด"]
       )
 
-    with col6:
+    with col7:
       equipment = st.text_input("อุปกรณ์ / เครื่องจักร / สถานที่ *")
 
     description = st.text_area("รายละเอียดปัญหาอาการเสีย / รายการ PM *")
 
-    st.markdown("🕒 **วันและเวลาที่เกิดเหตุ / บันทึกงาน**")
+    st.markdown("🕒 **วันและเวลาที่แจ้ง / วันและเวลาที่รับแจ้ง**")
     now_dt = get_thailand_now_dt()
-    col_d, col_t = st.columns(2)
-    with col_d:
-      report_date = st.date_input("📅 วันที่บันทึก", value=now_dt.date())
-    with col_t:
+    col_d1, col_t1, col_d2, col_t2 = st.columns(4)
+    with col_d1:
+      report_date = st.date_input("📅 วันที่แจ้ง", value=now_dt.date())
+    with col_t1:
       report_time = st.time_input(
-          "⏰ เวลาที่บันทึก", value=now_dt.time().replace(microsecond=0)
+          "⏰ เวลาที่แจ้ง", value=now_dt.time().replace(microsecond=0)
+      )
+    with col_d2:
+      received_date = st.date_input("📅 วันที่รับแจ้ง", value=now_dt.date())
+    with col_t2:
+      received_time = st.time_input(
+          "⏰ เวลาที่รับแจ้ง", value=now_dt.time().replace(microsecond=0)
       )
 
     uploaded_file = st.file_uploader(
@@ -262,6 +276,7 @@ with tab1:
 
         new_data = {
             "ticket_no": ticket_no.strip(),
+            "received_no": received_no.strip(),
             "reporter": reporter,
             "job_type": job_type,
             "department": department.strip(),
@@ -271,6 +286,8 @@ with tab1:
             "status": "รอดำเนินการ",
             "report_date": str(report_date),
             "report_time": report_time.strftime("%H:%M:%S"),
+            "received_date": str(received_date),
+            "received_time": received_time.strftime("%H:%M:%S"),
             "created_at": created_at_str,
             "image_before": image_b64,
             "technician": "",
@@ -290,7 +307,9 @@ with tab1:
           st.rerun()
         except Exception as e:
           st.error(
-              f"❌ ไม่สามารถบันทึกข้อมูลได้ กรุณาตรวจสอบว่ามีคอลัมน์ 'ticket_no' ใน Supabase หรือยัง (ข้อความแจ้งเตือน: {e})"
+              "❌ ไม่สามารถบันทึกข้อมูลได้"
+              " กรุณาตรวจสอบว่ามีคอลัมน์ใน Supabase หรือยัง (ข้อความแจ้งเตือน:"
+              f" {e})"
           )
       else:
         st.warning("⚠️ กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบถ้วน")
@@ -306,6 +325,7 @@ with tab2:
 
     display_cols = [
         "ticket_no",
+        "received_no",
         "reporter",
         "job_type",
         "department",
@@ -315,6 +335,8 @@ with tab2:
         "status",
         "report_date",
         "report_time",
+        "received_date",
+        "received_time",
         "technician",
         "cause",
         "solution",
@@ -325,6 +347,7 @@ with tab2:
     df_show = df_display[display_cols].copy()
     df_show.columns = [
         "เลขที่ใบแจ้งซ่อม",
+        "เลขที่รับแจ้ง",
         "ผู้แจ้ง",
         "ประเภทงาน",
         "แผนก",
@@ -334,6 +357,8 @@ with tab2:
         "สถานะ",
         "วันที่แจ้ง",
         "เวลาแจ้ง",
+        "วันที่รับแจ้ง",
+        "เวลาที่รับแจ้ง",
         "ผู้ซ่อม",
         "สาเหตุ",
         "วิธีแก้ไข",
@@ -390,8 +415,8 @@ with tab2:
           f"### ✏️ แก้ไขข้อมูลใบแจ้งซ่อม เลขที่: **{ticket['ticket_no']}**"
       )
 
-      st.markdown("#### 1️⃣ ข้อมูลการแจ้ง (ฝั่งผู้แจ้ง)")
-      col_e0, col_e1, col_e2, col_e3, col_e4 = st.columns(5)
+      st.markdown("#### 1️⃣ ข้อมูลการแจ้งและการรับแจ้ง (ฝั่งผู้แจ้ง / รับแจ้ง)")
+      col_e0, col_e01, col_e1, col_e2, col_e3, col_e4 = st.columns(6)
 
       job_type_list = ["แจ้งซ่อม", "PM"]
       curr_job_type = (
@@ -422,6 +447,11 @@ with tab2:
       with col_e0:
         ticket_no_edit = st.text_input(
             "เลขที่ใบแจ้งซ่อม", value=str(ticket["ticket_no"] or "")
+        )
+
+      with col_e01:
+        received_no_edit = st.text_input(
+            "เลขที่รับแจ้ง", value=str(ticket["received_no"] or "")
         )
 
       with col_e1:
@@ -460,18 +490,30 @@ with tab2:
           value=str(ticket["description"] or ""),
       )
 
-      st.markdown("🕒 **วันและเวลาที่แจ้ง (แก้ไขได้)**")
-      col_rd, col_rt = st.columns(2)
+      st.markdown("🕒 **วันเวลาที่แจ้ง & วันเวลาที่รับแจ้ง (แก้ไขได้)**")
+      col_rd, col_rt, col_rcd, col_rct = st.columns(4)
 
       init_rep_date = parse_date(ticket["report_date"], now_dt.date())
       init_rep_time = parse_time(
           ticket["report_time"], now_dt.time().replace(microsecond=0)
+      )
+      init_rec_date = parse_date(ticket["received_date"], now_dt.date())
+      init_rec_time = parse_time(
+          ticket["received_time"], now_dt.time().replace(microsecond=0)
       )
 
       with col_rd:
         report_date_edit = st.date_input("📅 วันที่แจ้ง", value=init_rep_date)
       with col_rt:
         report_time_edit = st.time_input("⏰ เวลาที่แจ้ง", value=init_rep_time)
+      with col_rcd:
+        received_date_edit = st.date_input(
+            "📅 วันที่รับแจ้ง", value=init_rec_date
+        )
+      with col_rct:
+        received_time_edit = st.time_input(
+            "⏰ เวลาที่รับแจ้ง", value=init_rec_time
+        )
 
       col_img1, col_img2 = st.columns(2)
       with col_img1:
@@ -572,6 +614,7 @@ with tab2:
 
         update_data = {
             "ticket_no": ticket_no_edit.strip(),
+            "received_no": received_no_edit.strip(),
             "reporter": reporter_edit,
             "job_type": job_type_edit,
             "department": department_edit.strip(),
@@ -580,6 +623,8 @@ with tab2:
             "priority": priority_edit,
             "report_date": str(report_date_edit),
             "report_time": report_time_edit.strftime("%H:%M:%S"),
+            "received_date": str(received_date_edit),
+            "received_time": received_time_edit.strftime("%H:%M:%S"),
             "created_at": created_at_str,
             "image_before": img_before_b64,
             "status": new_status,
@@ -770,9 +815,9 @@ with tab3:
         lambda x: "✅ มีรูป" if str(x).strip() != "" else "❌ ไม่มี"
     )
 
-    # เพิ่ม description เข้าไปในคอลัมน์รายงาน
     report_cols = [
         "ticket_no",
+        "received_no",
         "reporter",
         "job_type",
         "department",
@@ -781,6 +826,8 @@ with tab3:
         "status",
         "report_date",
         "report_time",
+        "received_date",
+        "received_time",
         "technician",
         "cause",
         "solution",
@@ -795,6 +842,7 @@ with tab3:
     completed_df_display = df_stats[report_cols].copy()
     completed_df_display.columns = [
         "เลขที่ใบแจ้งซ่อม",
+        "เลขที่รับแจ้ง",
         "ผู้แจ้ง",
         "ประเภทงาน",
         "แผนก",
@@ -803,6 +851,8 @@ with tab3:
         "สถานะ",
         "วันที่แจ้ง",
         "เวลาแจ้ง",
+        "วันที่รับแจ้ง",
+        "เวลาที่รับแจ้ง",
         "ช่างผู้ซ่อม",
         "สาเหตุ",
         "วิธีแก้ไข",
