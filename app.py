@@ -822,7 +822,7 @@ with tab3:
                 ).reset_index()
                 
                 parts_summary = parts_summary.sort_values(by="count", ascending=False)
-                parts_summary.columns = ["รายการอะไหล่ / อุปกรณ์", "จำนวนครั้งที่ใช้ (งาน)", "รายละเอียดจำนวน/หน่วย ที่บันทึก"]
+                parts_summary.columns = ["รายการอะไหล่ / อุปกรณ์", "จำนวนที่ใช้ (งาน)", "รายละเอียดจำนวน/หน่วย ที่บันทึก"]
                 
                 col_pmetric1, col_pmetric2 = st.columns(2)
                 col_pmetric1.metric("📦 ประเภทอะไหล่ที่ถูกใช้งาน", f"{len(parts_summary)} ชนิด")
@@ -834,10 +834,10 @@ with tab3:
                     top10_parts = parts_summary.head(10).sort_values(by="จำนวนครั้งที่ใช้ (งาน)", ascending=True)
                     fig_parts = px.bar(
                         top10_parts,
-                        x="จำนวนครั้งที่ใช้ (งาน)",
+                        x="จำนวนที่ใช้ (งาน)",
                         y="รายการอะไหล่ / อุปกรณ์",
                         orientation="h",
-                        text="จำนวนครั้งที่ใช้ (งาน)",
+                        text="จำนวนที่ใช้ (งาน)",
                         color="จำนวนครั้งที่ใช้ (งาน)",
                         color_continuous_scale="Viridis"
                     )
