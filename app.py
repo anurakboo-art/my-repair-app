@@ -68,7 +68,7 @@ def format_timedelta(td):
     return " ".join(parts)
 
 # -------------------------------------------------------------
-# Helper Functions สำหรับจัดการรูปภาพหลายรูป
+# Helper Functions สำหรับจัดการรูปภาพหลายรูป & การแต่งสีตาราง
 # -------------------------------------------------------------
 def compress_and_to_base64(image_bytes, max_size=(600, 600), quality=60):
     if not image_bytes:
@@ -144,6 +144,13 @@ def style_status(val):
     elif val == "กำลังดำเนินการ":
         return "background-color: #cce5ff; color: #004085; font-weight: bold;"
     return ""
+
+def apply_status_style(df_input):
+    """ฟังก์ชันแต่งสีตารางที่รองรับ Pandas ทั้งเวอร์ชันเก่าและใหม่"""
+    styler = df_input.style
+    if hasattr(styler, "map"):
+        return styler.map(style_status, subset=["สถานะ"])
+    return styler.applymap(style_status, subset=["สถานะ"])
 
 # กำหนดแผนก / โซน เริ่มต้น
 DEFAULT_DEPTS = ["สีฝุ่น", "สีน้ำมัน", "โซน 2"]
@@ -337,7 +344,7 @@ with tab2:
         df_show = df_filtered[display_cols].copy()
         df_show.columns = ["เลขที่ใบแจ้งซ่อม", "ผู้แจ้ง", "ประเภทงาน", "แผนก", "อุปกรณ์", "อาการเสีย/รายละเอียด", "ความเร่งด่วน", "สถานะ", "วันที่แจ้ง", "เวลาแจ้ง", "ผู้ซ่อม", "สาเหตุ", "วิธีแก้ไข", "วันที่เสร็จ", "เวลาเสร็จ"]
         
-        st.dataframe(df_show.style.applymap(style_status, subset=["สถานะ"]), use_container_width=True)
+        st.dataframe(apply_status_style(df_show), use_container_width=True)
         
         st.markdown("---")
         st.markdown("### ✏️ แก้ไขข้อมูล / อัปเดตงานซ่อม")
@@ -607,7 +614,7 @@ with tab3:
             "เวลาเสร็จ", "ระยะเวลาซ่อมรวม", "รูปก่อนซ่อม", "รูปหลังซ่อม"
         ]
         
-        st.dataframe(completed_df_display.style.applymap(style_status, subset=["สถานะ"]), use_container_width=True)
+        st.dataframe(apply_status_style(completed_df_display), use_container_width=True)
         
         csv_data = completed_df_display.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
