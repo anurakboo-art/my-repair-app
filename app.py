@@ -479,11 +479,22 @@ with tab2:
                 cause_input = st.text_area("สาเหตุของปัญหา / เหตุผลที่ยกเลิก", value=str(ticket.get("cause", "") or ""), height=70)
                 solution_input = st.text_area("วิธีแก้ไข / การดำเนินการ", value=str(ticket.get("solution", "") or ""), height=70)
                 
+                # 💡 ปรับเปลี่ยนเป็น Text Area ให้กรอกหลายบรรทัด / แยกเป็นข้อๆ ได้สะดวก
                 col_p1, col_p2 = st.columns(2)
                 with col_p1:
-                    parts_used = st.text_input("อะไหล่ที่ใช้", value=str(ticket.get("parts_used", "") or ""))
+                    parts_used = st.text_area(
+                        "🧩 อะไหล่ที่ใช้ (ระบุเป็นข้อๆ ได้)", 
+                        value=str(ticket.get("parts_used", "") or ""), 
+                        height=100,
+                        placeholder="1. อะไหล่ A\n2. อะไหล่ B"
+                    )
                 with col_p2:
-                    parts_qty = st.text_input("จำนวนอะไหล่", value=str(ticket.get("parts_qty", "") or ""))
+                    parts_qty = st.text_area(
+                        "🔢 จำนวนอะไหล่", 
+                        value=str(ticket.get("parts_qty", "") or ""), 
+                        height=100,
+                        placeholder="1. 2 ตัว\n2. 1 ชิ้น"
+                    )
                     
                 st.markdown("🕒 **วันและเวลาซ่อมเสร็จ**")
                 col_cd, col_ct = st.columns(2)
@@ -861,7 +872,24 @@ with tab3:
                         st.markdown(f"**📌 อาการเสีย / รายละเอียดงาน:** {t_detail.get('description', '-')}")
                         st.markdown(f"**🔍 สาเหตุของปัญหา:** {t_detail.get('cause', '-')}")
                         st.markdown(f"**🛠️ วิธีการแก้ไข / ผลงาน:** {t_detail.get('solution', '-')}")
-                        st.markdown(f"**🧩 อะไหล่ที่ใช้:** {t_detail.get('parts_used', '-')} (จำนวน: {t_detail.get('parts_qty', '-')})")
+                        
+                        # 💡 จัดการการแสดงรายการอะไหล่และจำนวนแบบ multi-line / หลายข้อ
+                        p_used = str(t_detail.get('parts_used', '') or '').strip()
+                        p_qty = str(t_detail.get('parts_qty', '') or '').strip()
+                        
+                        col_part1, col_part2 = st.columns(2)
+                        with col_part1:
+                            st.markdown("**🧩 อะไหล่ที่ใช้:**")
+                            if p_used:
+                                st.text(p_used)
+                            else:
+                                st.write("-")
+                        with col_part2:
+                            st.markdown("**🔢 จำนวนอะไหล่:**")
+                            if p_qty:
+                                st.text(p_qty)
+                            else:
+                                st.write("-")
 
                         st.markdown("---")
                         col_img1, col_img2 = st.columns(2)
