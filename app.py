@@ -138,16 +138,19 @@ COLUMN_NAMES = [
 
 def load_data():
   try:
+    # ดึงข้อมูลทั้งหมดจาก Supabase
     response = (
         supabase.table("repair_requests")
         .select("*")
-        .order("id", desc=False)
+        .order("report_date", desc=False)
+        .order("report_time", desc=False)
         .execute()
     )
     data = response.data
     if not data:
       df = pd.DataFrame(columns=COLUMN_NAMES)
       return df
+
     df = pd.DataFrame(data)
     for col in COLUMN_NAMES:
       if col not in df.columns:
@@ -155,7 +158,17 @@ def load_data():
 
     df["job_type"] = df["job_type"].replace("", "แจ้งซ่อม").fillna("แจ้งซ่อม")
 
-    # หากไม่มีเลขที่ใบแจ้งซ่อม ให้แสดงค่าสำรองอ้างอิงจาก ID
+    # รวมวันที่และเวลาเพื่อจัดเรียงลำดับจากเก่าไปใหม่ (วันที่มาก่อน อยู่ก่อนหน้า)
+    df["temp_dt"] = pd.to_datetime(
+        df["report_date"].astype(str) + " " + df["report_time"].astype(str),
+        errors="coerce",
+    )
+    df = df.sort_values(
+        by=["temp_dt", "created_at", "id"], ascending=[True, True, True]
+    ).reset_index(drop=True)
+    df = df.drop(columns=["temp_dt"])
+
+    # หากไม่มีเลขที่ใบแจ้งซ่อม ให้แสดงค่าสำรองอ้างอิงลำดับ
     def fill_ticket_no(row):
       t_no = str(row.get("ticket_no", "") or "").strip()
       if t_no:
@@ -203,12 +216,17 @@ with tab1:
   if "success_msg" in st.session_state:
     st.success(st.session_state.pop("success_msg"))
 
+  # สร้างเลขที่ใบแจ้งซ่อมตั้งต้นอัตโนมัติตามลำดับจำนวนงาน
+  default_ticket_no = f"REP-{(len(df_data) + 1):04d}"
+
   with st.form(key="repair_form", clear_on_submit=True):
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
       ticket_no = st.text_input(
-          "เลขที่ใบแจ้งซ่อม *", placeholder="เช่น REP-0001"
+          "เลขที่ใบแจ้งซ่อม *",
+          value=default_ticket_no,
+          placeholder="เช่น REP-0001",
       )
 
     with col2:
@@ -374,16 +392,18 @@ with tab2:
     st.dataframe(styled_df, use_container_width=True)
     st.markdown("---")
 
+    # ตัวเลือกรายการเรียงตามวันที่เก่าไปใหม่
     ticket_options = {
         row["id"]: (
-            f"{row['ticket_no']} | {row['job_type']} - แผนก {row['department']}"
-            f" | อุปกรณ์: {row['equipment']} ({row['status']})"
+            f"{row['ticket_no']} | วันที่: {row['report_date']} |"
+            f" {row['job_type']} - แผนก {row['department']} | อุปกรณ์:"
+            f" {row['equipment']} ({row['status']})"
         )
         for _, row in df_data.iterrows()
     }
 
     selected_id = st.selectbox(
-        "🔍 เลือกใบแจ้งซ่อมที่ต้องการแก้ไข / อัปเดตข้อมูล",
+        "🔍 เลือกใบแจ้งซ่อมที่ต้องการแก้ไข / อัปเดตข้อมูล (เรียงจากเก่าไปใหม่)",
         options=list(ticket_options.keys()),
         format_func=lambda x: ticket_options[x],
     )
@@ -808,7 +828,7 @@ with tab3:
       st.plotly_chart(fig_pie, use_container_width=True)
 
     st.markdown("---")
-    st.markdown("### 🛠️ ตารางรายงานการทำงาน (สำหรับส่งออกข้อมูล)")
+    st.markdown("### 🛠️ ตารางรายงานการทำงาน (เรียงตามวันที่เก่าไปใหม่)")
 
     df_stats["ระยะเวลาซ่อมรวม"] = df_stats["duration"].apply(format_timedelta)
     df_stats["สถานะรูปหลังซ่อม"] = df_stats["image_after"].apply(
