@@ -5,6 +5,7 @@ from PIL import Image
 import io
 import base64
 import json
+import re
 import plotly.express as px
 from supabase import create_client
 
@@ -479,7 +480,6 @@ with tab2:
                 cause_input = st.text_area("สาเหตุของปัญหา / เหตุผลที่ยกเลิก", value=str(ticket.get("cause", "") or ""), height=70)
                 solution_input = st.text_area("วิธีแก้ไข / การดำเนินการ", value=str(ticket.get("solution", "") or ""), height=70)
                 
-                # 💡 ปรับเปลี่ยนเป็น Text Area ให้กรอกหลายบรรทัด / แยกเป็นข้อๆ ได้สะดวก
                 col_p1, col_p2 = st.columns(2)
                 with col_p1:
                     parts_used = st.text_area(
@@ -778,6 +778,76 @@ with tab3:
                 )
                 fig_dept.update_layout(showlegend=False)
                 st.plotly_chart(fig_dept, use_container_width=True)
+
+            # =============================================================
+            # 🧩 สรุปสถิติการใช้อะไหล่และอุปกรณ์ (Spare Parts Report)
+            # =============================================================
+            st.markdown("---")
+            st.markdown("### 🧩 สรุปสถิติการใช้อะไหล่และอุปกรณ์ (Spare Parts Report)")
+
+            def parse_parts_summary(df_in):
+                items = []
+                for idx, row in df_in.iterrows():
+                    p_str = str(row.get("parts_used", "") or "").strip()
+                    q_str = str(row.get("parts_qty", "") or "").strip()
+                    
+                    if not p_str or p_str.lower() == "nan":
+                        continue
+                        
+                    p_lines = [line.strip() for line in p_str.split('\n') if line.strip()]
+                    q_lines = [line.strip() for line in q_str.split('\n') if line.strip()]
+                    
+                    for i, p_line in enumerate(p_lines):
+                        clean_part = re.sub(r'^\d+[\.\)]\s*|^[-\*]\s*', '', p_line).strip()
+                        qty_val = ""
+                        if i < len(q_lines):
+                            qty_val = re.sub(r'^\d+[\.\)]\s*|^[-\*]\s*', '', q_lines[i]).strip()
+                        
+                        if clean_part:
+                            items.append({
+                                "ticket_no": row.get("ticket_no", ""),
+                                "อะไหล่": clean_part,
+                                "จำนวน": qty_val if qty_val else "-"
+                            })
+                return pd.DataFrame(items)
+
+            df_parts_parsed = parse_parts_summary(df_stats)
+
+            if df_parts_parsed.empty:
+                st.info("ℹ️ ยังไม่มีข้อมูลการบันทึกใช้อะไหล่ในช่วงเวลาที่เลือก")
+            else:
+                parts_summary = df_parts_parsed.groupby("อะไหล่").agg(
+                    count=("อะไหล่", "count"),
+                    qty_detail=("จำนวน", lambda x: ", ".join([str(v) for v in x if str(v) != "-"] or ["-"]))
+                ).reset_index()
+                
+                parts_summary = parts_summary.sort_values(by="count", ascending=False)
+                parts_summary.columns = ["รายการอะไหล่ / อุปกรณ์", "จำนวนครั้งที่ใช้ (งาน)", "รายละเอียดจำนวน/หน่วย ที่บันทึก"]
+                
+                col_pmetric1, col_pmetric2 = st.columns(2)
+                col_pmetric1.metric("📦 ประเภทอะไหล่ที่ถูกใช้งาน", f"{len(parts_summary)} ชนิด")
+                col_pmetric2.metric("📋 รวมรายการเบิกใช้อะไหล่ทั้งหมด", f"{len(df_parts_parsed)} รายการ")
+                
+                col_pchart, col_ptable = st.columns([1, 1])
+                with col_pchart:
+                    st.markdown("##### 📊 10 อันดับอะไหล่ที่ถูกใช้มากที่สุด")
+                    top10_parts = parts_summary.head(10).sort_values(by="จำนวนครั้งที่ใช้ (งาน)", ascending=True)
+                    fig_parts = px.bar(
+                        top10_parts,
+                        x="จำนวนครั้งที่ใช้ (งาน)",
+                        y="รายการอะไหล่ / อุปกรณ์",
+                        orientation="h",
+                        text="จำนวนครั้งที่ใช้ (งาน)",
+                        color="จำนวนครั้งที่ใช้ (งาน)",
+                        color_continuous_scale="Viridis"
+                    )
+                    fig_parts.update_traces(textposition="outside")
+                    fig_parts.update_layout(showlegend=False, coloraxis_showscale=False, yaxis_title="")
+                    st.plotly_chart(fig_parts, use_container_width=True)
+                    
+                with col_ptable:
+                    st.markdown("##### 📋 ตารางรายละเอียดสรุปการใช้อะไหล่")
+                    st.dataframe(parts_summary, use_container_width=True, hide_index=True)
                 
             st.markdown("---")
             st.markdown("### 📄 ตารางรายงานสรุปงานซ่อม (เรียงตามวันที่แจ้ง)")
@@ -873,7 +943,6 @@ with tab3:
                         st.markdown(f"**🔍 สาเหตุของปัญหา:** {t_detail.get('cause', '-')}")
                         st.markdown(f"**🛠️ วิธีการแก้ไข / ผลงาน:** {t_detail.get('solution', '-')}")
                         
-                        # 💡 จัดการการแสดงรายการอะไหล่และจำนวนแบบ multi-line / หลายข้อ
                         p_used = str(t_detail.get('parts_used', '') or '').strip()
                         p_qty = str(t_detail.get('parts_qty', '') or '').strip()
                         
