@@ -659,17 +659,21 @@ with tab3:
             
             valid_durations = df_stats["repair_duration"].dropna()
             avg_duration_str = "-"
+            total_duration_str = "-"
             if not valid_durations.empty:
                 avg_td = valid_durations.mean()
+                sum_td = valid_durations.sum()
                 avg_duration_str = format_timedelta(avg_td)
+                total_duration_str = format_timedelta(sum_td)
                 
-            m1, m2, m3, m4, m5, m6 = st.columns(6)
+            m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
             m1.metric("📋 งานทั้งหมด", f"{total_jobs} งาน")
             m2.metric("✅ เสร็จสิ้นแล้ว", f"{done_jobs} งาน")
-            m3.metric("⚠️ งานค้างสะสม (ติดอยู่)", f"{outstanding_jobs} งาน")
+            m3.metric("⚠️ งานค้างสะสม", f"{outstanding_jobs} งาน")
             m4.metric("⏳ รอดำเนินการ", f"{pending_jobs} งาน")
             m5.metric("🔄 กำลังซ่อม", f"{in_prog_jobs} งาน")
-            m6.metric("⏱️ เวลาซ่อมเฉลี่ย", avg_duration_str)
+            m6.metric("⏱️ เวลาซ่อมรวมทั้งหมด", total_duration_str)
+            m7.metric("⏱️ เวลาซ่อมเฉลี่ย", avg_duration_str)
             
             st.markdown("---")
             
