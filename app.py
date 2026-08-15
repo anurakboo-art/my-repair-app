@@ -101,7 +101,6 @@ st.set_page_config(
     page_title="ใบแจ้งซ่อม-บันทึกการซ่อม", page_icon="🛠️", layout="wide"
 )
 
-# หัวกระดาษหลักของแอป
 st.title("🛠️ ใบแจ้งซ่อม & บันทึกงาน PM")
 
 url = st.secrets["SUPABASE_URL"]
@@ -149,7 +148,6 @@ def load_data():
       if col not in df.columns:
         df[col] = ""
 
-    # กำหนดค่าเริ่มต้นของ job_type เป็น 'แจ้งซ่อม' หากข้อมูลเก่าเป็นค่าว่าง
     df["job_type"] = df["job_type"].replace("", "แจ้งซ่อม").fillna("แจ้งซ่อม")
     return df
   except Exception as e:
@@ -159,7 +157,6 @@ def load_data():
 
 df_data = load_data()
 
-# ดึงรายการแผนกทั้งหมดที่มีอยู่ในฐานข้อมูลมารวมกับแผนกเริ่มต้น
 default_depts = ["สีฝุ่น", "สีน้ำมัน", "โซน 2"]
 if not df_data.empty and "department" in df_data.columns:
   db_depts = [
@@ -251,15 +248,19 @@ with tab1:
             "solution": "",
             "parts_used": "",
             "parts_qty": "",
-            "completed_date": None,
-            "completed_time": None,
-            "completed_at": None,
             "image_after": "",
         }
 
-        res = supabase.table("repair_requests").insert(new_data).execute()
-        st.success("✅ บันทึกข้อมูลเรียบร้อยแล้ว!")
-        st.rerun()
+        # ส่งข้อมูลเข้า Supabase พร้อมดักจับข้อผิดพลาด
+        try:
+          res = supabase.table("repair_requests").insert(new_data).execute()
+          st.success("✅ บันทึกข้อมูลเรียบร้อยแล้ว!")
+          st.rerun()
+        except Exception as e:
+          st.error(
+              f"❌ ไม่สามารถบันทึกข้อมูลได้ กรุณาตรวจสอบว่ามีคอลัมน์ 'job_type' ใน Supabase หรือไม่ (ข้อความแจ้งเตือน: {e})"
+          )
+
       else:
         st.warning("⚠️ กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบถ้วน")
 
@@ -325,7 +326,6 @@ with tab2:
 
     now_dt = get_thailand_now_dt()
 
-    # --- ปุ่มลบใบแจ้งซ่อม ---
     with st.expander("⚠️ ต้องการลบรายการนี้?"):
       st.write(
           f"หากต้องการลบรายการ ID **{selected_id}** ออกจากฐานข้อมูล ให้กดปุ่มด้านล่าง"
@@ -333,17 +333,18 @@ with tab2:
       if st.button(
           f"🗑️ ยืนยันลบ ID {selected_id}", type="primary", key="del_btn"
       ):
-        supabase.table("repair_requests").delete().eq(
-            "id", selected_id
-        ).execute()
-        st.success(f"🗑️ ลบรายการ ID {selected_id} เรียบร้อยแล้ว!")
-        st.rerun()
+        try:
+          supabase.table("repair_requests").delete().eq(
+              "id", selected_id
+          ).execute()
+          st.success(f"🗑️ ลบรายการ ID {selected_id} เรียบร้อยแล้ว!")
+          st.rerun()
+        except Exception as e:
+          st.error(f"❌ เกิดข้อผิดพลาดในการลบ: {e}")
 
-    # --- ฟอร์มแก้ไขข้อมูลทั้งหมด ---
     with st.form(key="edit_full_form"):
       st.markdown(f"### ✏️ แก้ไขข้อมูลรายการ ID: **{ticket['id']}**")
 
-      # --- ส่วนที่ 1: ข้อมูลผู้แจ้งซ่อม ---
       st.markdown("#### 1️⃣ ข้อมูลการแจ้ง (ฝั่งผู้แจ้ง)")
       col_e1, col_e2, col_e3, col_e4 = st.columns(4)
 
@@ -438,7 +439,6 @@ with tab2:
 
       st.markdown("---")
 
-      # --- ส่วนที่ 2: ข้อมูลงานซ่อมของช่าง ---
       st.markdown("#### 2️⃣ การดำเนินงานของช่าง (ฝั่งผู้ซ่อม)")
 
       status_list = ["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"]
@@ -520,15 +520,6 @@ with tab2:
 
         created_at_str = f"{report_date_edit} {report_time_edit.strftime('%H:%M:%S')}+07:00"
 
-        comp_date_str = None
-        comp_time_str = None
-        comp_at_str = None
-
-        if new_status == "เสร็จสิ้น":
-          comp_date_str = str(completed_date_edit)
-          comp_time_str = completed_time_edit.strftime("%H:%M:%S")
-          comp_at_str = f"{comp_date_str} {comp_time_str}+07:00"
-
         update_data = {
             "reporter": reporter_edit,
             "job_type": job_type_edit,
@@ -546,19 +537,26 @@ with tab2:
             "solution": solution_input,
             "parts_used": parts_used,
             "parts_qty": parts_qty,
-            "completed_date": comp_date_str,
-            "completed_time": comp_time_str,
-            "completed_at": comp_at_str,
             "image_after": img_after_b64,
         }
 
-        supabase.table("repair_requests").update(update_data).eq(
-            "id", selected_id
-        ).execute()
-        st.success(
-            f"✅ แก้ไขข้อมูลรายการ ID {selected_id} และอัปเดตลง Supabase เรียบร้อยแล้ว!"
-        )
-        st.rerun()
+        if new_status == "เสร็จสิ้น":
+          comp_date_str = str(completed_date_edit)
+          comp_time_str = completed_time_edit.strftime("%H:%M:%S")
+          update_data["completed_date"] = comp_date_str
+          update_data["completed_time"] = comp_time_str
+          update_data["completed_at"] = f"{comp_date_str} {comp_time_str}+07:00"
+
+        try:
+          supabase.table("repair_requests").update(update_data).eq(
+              "id", selected_id
+          ).execute()
+          st.success(
+              f"✅ แก้ไขข้อมูลรายการ ID {selected_id} เรียบร้อยแล้ว!"
+          )
+          st.rerun()
+        except Exception as e:
+          st.error(f"❌ เกิดข้อผิดพลาดในการอัปเดตข้อมูล: {e}")
 
   else:
     st.info("ยังไม่มีข้อมูลการแจ้งซ่อมในระบบ")
@@ -628,7 +626,6 @@ with tab3:
           horizontal=True,
       )
 
-      # แมปชื่อคอลัมน์สำหรับการแยกสี
       color_col = (
           "department"
           if chart_color_by == "แผนก"
@@ -650,7 +647,6 @@ with tab3:
           .reset_index(name="จำนวนงาน")
       )
 
-      # กำหนดสีเฉพาะสำหรับบางกลุ่ม
       color_map = None
       if color_col == "status":
         color_map = {
