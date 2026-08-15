@@ -728,7 +728,15 @@ with tab3:
             st.markdown("##### 🏢 จำนวนงานแยกตามแผนก")
             dept_counts = df_stats["department"].value_counts().reset_index()
             dept_counts.columns = ["แผนก", "จำนวน"]
-            fig_dept = px.bar(dept_counts, x="จำนวน", y="แผนก", orientation="h", color_discrete_sequence=["#3366cc"])
+            fig_dept = px.bar(
+                dept_counts, 
+                x="จำนวน", 
+                y="แผนก", 
+                orientation="h", 
+                color="แผนก",
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            fig_dept.update_layout(showlegend=False)
             st.plotly_chart(fig_dept, use_container_width=True)
             
         st.markdown("---")
