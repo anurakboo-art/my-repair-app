@@ -101,7 +101,7 @@ st.set_page_config(
     page_title="ใบแจ้งซ่อม-บันทึกการซ่อม", page_icon="🛠️", layout="wide"
 )
 
-st.title("🛠️ ใบแจ้งซ่อม & บันทึกงาน PM (แผนกช่าง)")
+st.title("🛠️ ใบแจ้งซ่อม & บันทึกงาน PM")
 
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
