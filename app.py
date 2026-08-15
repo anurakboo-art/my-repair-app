@@ -42,7 +42,15 @@ def parse_time(val, default_time):
     if not val or pd.isna(val):
         return default_time
     try:
-        return datetime.strptime(str(val)[:8], "%H:%M:%S").time()
+        val_str = str(val).strip()
+        if "T" in val_str:
+            val_str = val_str.split("T")[1]
+        val_str = val_str.split("+")[0].split(".")[0] # ตัด timezone / microseconds ออก
+        if len(val_str) >= 8:
+            return datetime.strptime(val_str[:8], "%H:%M:%S").time()
+        elif len(val_str) >= 5:
+            return datetime.strptime(val_str[:5], "%H:%M").time()
+        return default_time
     except Exception:
         return default_time
 
@@ -300,7 +308,8 @@ with tab1:
                     st.error(f"❌ เลขที่ใบแจ้งซ่อม '{ticket_no.strip()}' มีในระบบแล้ว กรุณาใช้เลขอื่น")
                 else:
                     image_b64 = compress_multiple_to_json(uploaded_images_b) if uploaded_images_b else ""
-                    created_at_str = datetime.combine(report_date, report_time).astimezone(THAILAND_TZ).isoformat()
+                    # 📌 แก้ไขจุดนี้: ใช้ .replace(tzinfo=THAILAND_TZ) เพื่อให้เวลาตรงกับที่ผู้ใช้กรอก
+                    created_at_str = datetime.combine(report_date, report_time).replace(tzinfo=THAILAND_TZ).isoformat()
                     
                     new_data = {
                         "ticket_no": ticket_no.strip(),
@@ -454,7 +463,6 @@ with tab2:
                 st.markdown("---")
                 st.markdown("#### 2️⃣ การดำเนินงานของช่าง (ฝั่งผู้ซ่อม)")
                 
-                # 📌 ส่วนที่เพิ่มตามคำขอ: เลขที่รับ, วันที่รับ, เวลาที่รับ
                 curr_rcv_no = str(ticket.get("received_no", "") or "").strip()
                 if not curr_rcv_no:
                     curr_rcv_no = generate_default_received_no(df)
@@ -536,10 +544,10 @@ with tab2:
                         if new_status == "เสร็จสิ้น":
                             comp_date_str = str(completed_date)
                             comp_time_str = completed_time.strftime("%H:%M:%S")
-                            completed_at_str = datetime.combine(completed_date, completed_time).astimezone(THAILAND_TZ).isoformat()
+                            completed_at_str = datetime.combine(completed_date, completed_time).replace(tzinfo=THAILAND_TZ).isoformat()
                             
-                        created_at_str = datetime.combine(report_date_edit, report_time_edit).astimezone(THAILAND_TZ).isoformat()
-                        received_at_str = datetime.combine(received_date_input, received_time_input).astimezone(THAILAND_TZ).isoformat() if received_no_input else None
+                        created_at_str = datetime.combine(report_date_edit, report_time_edit).replace(tzinfo=THAILAND_TZ).isoformat()
+                        received_at_str = datetime.combine(received_date_input, received_time_input).replace(tzinfo=THAILAND_TZ).isoformat() if received_no_input else None
                         
                         update_data = {
                             "ticket_no": ticket_no_edit.strip(),
@@ -571,7 +579,7 @@ with tab2:
                         
                         try:
                             supabase.table("tickets").update(update_data).eq("id", ticket["id"]).execute()
-                            st.success(f"✅ อัปเดตข้อมูลใบแจ้งซ่อม **{ticket_no_edit}** (เลขที่รับ: **{received_no_input}**) เรียบร้อยแล้ว!")
+                            st.success(f"✅ อัปเดตข้อมูลใบแจ้งซ่อม **{ticket_no_edit}** เรียบร้อยแล้ว!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
@@ -590,12 +598,17 @@ with tab3:
         def calc_repair_time(row):
             if row["status"] == "เสร็จสิ้น" and pd.notna(row.get("completed_date")):
                 try:
-                    # คำนวณระยะเวลาตั้งแต่วันที่รับงาน (หรือวันที่แจ้งกรณีที่ไม่มีรับงาน) ถึงวันที่เสร็จ
                     s_date = row['received_date'] if pd.notna(row.get('received_date')) and str(row.get('received_date')).strip() != "" else row['report_date']
                     s_time = row['received_time'] if pd.notna(row.get('received_time')) and str(row.get('received_time')).strip() != "" else row['report_time']
                     
-                    start_dt = pd.to_datetime(f"{s_date} {s_time}")
-                    end_dt = pd.to_datetime(f"{row['completed_date']} {row['completed_time']}")
+                    if pd.isna(s_date) or str(s_date).strip() == "":
+                        return None
+                        
+                    s_time_str = str(s_time).strip() if pd.notna(s_time) and str(s_time).strip() != "" else "00:00:00"
+                    c_time_str = str(row['completed_time']).strip() if pd.notna(row['completed_time']) and str(row['completed_time']).strip() != "" else "00:00:00"
+                    
+                    start_dt = pd.to_datetime(f"{s_date} {s_time_str[:8]}")
+                    end_dt = pd.to_datetime(f"{row['completed_date']} {c_time_str[:8]}")
                     if end_dt >= start_dt:
                         return end_dt - start_dt
                 except Exception:
