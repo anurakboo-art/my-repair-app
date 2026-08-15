@@ -154,7 +154,6 @@ def style_status(val):
     return ""
 
 def apply_status_style(df_input):
-    """ฟังก์ชันแต่งสีตารางที่รองรับ Pandas ทั้งเวอร์ชันเก่าและใหม่"""
     styler = df_input.style
     if hasattr(styler, "map"):
         return styler.map(style_status, subset=["สถานะ"])
@@ -167,7 +166,7 @@ COLUMN_NAMES = [
     "id", "ticket_no", "reporter", "job_type", "department", "equipment", 
     "description", "priority", "status", "report_date", "report_time", 
     "created_at", "image_before", "received_no", "received_date", "received_time", 
-    "received_at", "technician", "cause", "solution", "parts_used", "parts_qty", 
+    "technician", "cause", "solution", "parts_used", "parts_qty", 
     "completed_date", "completed_time", "completed_at", "image_after"
 ]
 
@@ -449,7 +448,6 @@ with tab2:
                 with col_rt:
                     report_time_edit = st.time_input("⏰ เวลาที่แจ้ง", value=init_rep_time)
                 
-                # แสดงรูปถ่ายก่อนซ่อมเดิม
                 display_image_gallery(ticket.get("image_before", ""), title="🖼️ รูปถ่ายก่อนซ่อมปัจจุบัน")
                 
                 uploaded_images_b_new = st.file_uploader(
@@ -480,7 +478,6 @@ with tab2:
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                # 📌 สถานะงาน: ช่างสามารถเลือก "ยกเลิก" ได้ที่นี่
                 status_options = ["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"]
                 curr_status = str(ticket["status"] or "รอดำเนินการ")
                 status_idx = status_options.index(curr_status) if curr_status in status_options else 0
@@ -511,7 +508,6 @@ with tab2:
                 with col_ct:
                     completed_time = st.time_input("⏰ เวลาที่ซ่อมเสร็จ", value=init_comp_time)
                 
-                # แสดงรูปถ่ายหลังซ่อมเดิม
                 display_image_gallery(ticket.get("image_after", ""), title="🖼️ รูปถ่ายหลังซ่อมปัจจุบัน")
                 
                 uploaded_images_a_new = st.file_uploader(
@@ -547,8 +543,8 @@ with tab2:
                             completed_at_str = datetime.combine(completed_date, completed_time).replace(tzinfo=THAILAND_TZ).isoformat()
                             
                         created_at_str = datetime.combine(report_date_edit, report_time_edit).replace(tzinfo=THAILAND_TZ).isoformat()
-                        received_at_str = datetime.combine(received_date_input, received_time_input).replace(tzinfo=THAILAND_TZ).isoformat() if received_no_input else None
                         
+                        # ตัด received_at ออกเรียบร้อยเพื่อแก้ปัญหา PGRST204
                         update_data = {
                             "ticket_no": ticket_no_edit.strip(),
                             "reporter": reporter_edit,
@@ -564,7 +560,6 @@ with tab2:
                             "received_no": received_no_input.strip(),
                             "received_date": str(received_date_input) if received_no_input else "",
                             "received_time": received_time_input.strftime("%H:%M:%S") if received_no_input else "",
-                            "received_at": received_at_str,
                             "status": new_status,
                             "technician": technician_name,
                             "cause": cause_input,
@@ -584,7 +579,7 @@ with tab2:
                         except Exception as e:
                             st.error(f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
 
-            # 📌 ส่วนที่เพิ่มตามคำขอ: โซนสำหรับลบใบแจ้งซ่อมถาวรออกจากฐานข้อมูล
+            # โซนสำหรับลบใบแจ้งซ่อมถาวรออกจากฐานข้อมูล
             st.markdown("<br>", unsafe_allow_html=True)
             with st.expander("🚨 โซนอันตราย: ลบใบแจ้งซ่อมนี้ออกจากระบบถาวร"):
                 st.warning(f"⚠️ คำเตือน: การลบใบแจ้งซ่อมเลขที่ **{ticket['ticket_no']}** จะลบข้อมูลออกจากระบบอย่างถาวร ไม่สามารถกู้คืนได้")
