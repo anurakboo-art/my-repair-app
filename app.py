@@ -158,9 +158,9 @@ DEFAULT_DEPTS = ["สีฝุ่น", "สีน้ำมัน", "โซน 2"
 COLUMN_NAMES = [
     "id", "ticket_no", "reporter", "job_type", "department", "equipment", 
     "description", "priority", "status", "report_date", "report_time", 
-    "created_at", "image_before", "technician", "cause", "solution", 
-    "parts_used", "parts_qty", "completed_date", "completed_time", 
-    "completed_at", "image_after"
+    "created_at", "image_before", "received_no", "received_date", "received_time", 
+    "received_at", "technician", "cause", "solution", "parts_used", "parts_qty", 
+    "completed_date", "completed_time", "completed_at", "image_after"
 ]
 
 def load_data():
@@ -199,6 +199,26 @@ def generate_default_ticket_no(df):
     for t in today_tickets["ticket_no"].astype(str):
         try:
             num = int(t.split("-")[-1])
+            if num > max_num:
+                max_num = num
+        except Exception:
+            pass
+    return f"{prefix}{max_num + 1:03d}"
+
+def generate_default_received_no(df):
+    now = get_thailand_now_dt()
+    prefix = f"RCV-{now.strftime('%Y%m%d')}-"
+    if df.empty or "received_no" not in df.columns:
+        return f"{prefix}001"
+    
+    today_rcv = df[df["received_no"].astype(str).str.startswith(prefix)]
+    if today_rcv.empty:
+        return f"{prefix}001"
+    
+    max_num = 0
+    for r in today_rcv["received_no"].astype(str):
+        try:
+            num = int(r.split("-")[-1])
             if num > max_num:
                 max_num = num
         except Exception:
@@ -295,6 +315,9 @@ with tab1:
                         "report_time": report_time.strftime("%H:%M:%S"),
                         "created_at": created_at_str,
                         "image_before": image_b64,
+                        "received_no": "",
+                        "received_date": "",
+                        "received_time": "",
                         "technician": "",
                         "cause": "",
                         "solution": "",
@@ -323,7 +346,7 @@ with tab2:
         with col_f1:
             status_filter = st.multiselect("กรองตามสถานะ", options=["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ"])
         with col_f2:
-            search_kw = st.text_input("🔍 ค้นหา (เลขใบแจ้งซ่อม / ชื่อผู้แจ้ง / อุปกรณ์ / รายละเอียด)", "")
+            search_kw = st.text_input("🔍 ค้นหา (เลขใบแจ้งซ่อม / เลขที่รับ / ชื่อผู้แจ้ง / อุปกรณ์)", "")
             
         df_filtered = df.copy()
         if status_filter:
@@ -332,6 +355,7 @@ with tab2:
             kw = search_kw.lower()
             df_filtered = df_filtered[
                 df_filtered["ticket_no"].astype(str).str.lower().str.contains(kw) |
+                df_filtered["received_no"].astype(str).str.lower().str.contains(kw) |
                 df_filtered["reporter"].astype(str).str.lower().str.contains(kw) |
                 df_filtered["equipment"].astype(str).str.lower().str.contains(kw) |
                 df_filtered["description"].astype(str).str.lower().str.contains(kw)
@@ -339,10 +363,19 @@ with tab2:
             
         st.markdown(f"**รายการใบแจ้งซ่อม ({len(df_filtered)} รายการ) - เรียงตามวันที่ (เก่า ➔ ใหม่):**")
         
-        display_cols = ["ticket_no", "reporter", "job_type", "department", "equipment", "description", "priority", "status", "report_date", "report_time", "technician", "cause", "solution", "completed_date", "completed_time"]
+        display_cols = [
+            "ticket_no", "received_no", "reporter", "job_type", "department", "equipment", 
+            "description", "priority", "status", "report_date", "report_time", 
+            "received_date", "received_time", "technician", "cause", "solution", 
+            "completed_date", "completed_time"
+        ]
         
         df_show = df_filtered[display_cols].copy()
-        df_show.columns = ["เลขที่ใบแจ้งซ่อม", "ผู้แจ้ง", "ประเภทงาน", "แผนก", "อุปกรณ์", "อาการเสีย/รายละเอียด", "ความเร่งด่วน", "สถานะ", "วันที่แจ้ง", "เวลาแจ้ง", "ผู้ซ่อม", "สาเหตุ", "วิธีแก้ไข", "วันที่เสร็จ", "เวลาเสร็จ"]
+        df_show.columns = [
+            "เลขที่ใบแจ้งซ่อม", "เลขที่รับ", "ผู้แจ้ง", "ประเภทงาน", "แผนก", "อุปกรณ์", 
+            "อาการเสีย/รายละเอียด", "ความเร่งด่วน", "สถานะ", "วันที่แจ้ง", "เวลาแจ้ง", 
+            "วันที่รับ", "เวลาที่รับ", "ผู้ซ่อม", "สาเหตุ", "วิธีแก้ไข", "วันที่เสร็จ", "เวลาเสร็จ"
+        ]
         
         st.dataframe(apply_status_style(df_show), use_container_width=True)
         
@@ -421,6 +454,25 @@ with tab2:
                 st.markdown("---")
                 st.markdown("#### 2️⃣ การดำเนินงานของช่าง (ฝั่งผู้ซ่อม)")
                 
+                # 📌 ส่วนที่เพิ่มตามคำขอ: เลขที่รับ, วันที่รับ, เวลาที่รับ
+                curr_rcv_no = str(ticket.get("received_no", "") or "").strip()
+                if not curr_rcv_no:
+                    curr_rcv_no = generate_default_received_no(df)
+                    
+                col_rcv1, col_rcv2, col_rcv3 = st.columns(3)
+                with col_rcv1:
+                    received_no_input = st.text_input("เลขที่รับงาน / ใบรับ", value=curr_rcv_no)
+                
+                init_rcv_date = parse_date(ticket.get("received_date"), now_dt.date())
+                init_rcv_time = parse_time(ticket.get("received_time"), now_dt.time().replace(microsecond=0))
+                
+                with col_rcv2:
+                    received_date_input = st.date_input("📅 วันที่รับงาน", value=init_rcv_date)
+                with col_rcv3:
+                    received_time_input = st.time_input("⏰ เวลาที่รับงาน", value=init_rcv_time)
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                
                 status_options = ["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"]
                 curr_status = str(ticket["status"] or "รอดำเนินการ")
                 status_idx = status_options.index(curr_status) if curr_status in status_options else 0
@@ -487,6 +539,7 @@ with tab2:
                             completed_at_str = datetime.combine(completed_date, completed_time).astimezone(THAILAND_TZ).isoformat()
                             
                         created_at_str = datetime.combine(report_date_edit, report_time_edit).astimezone(THAILAND_TZ).isoformat()
+                        received_at_str = datetime.combine(received_date_input, received_time_input).astimezone(THAILAND_TZ).isoformat() if received_no_input else None
                         
                         update_data = {
                             "ticket_no": ticket_no_edit.strip(),
@@ -500,6 +553,10 @@ with tab2:
                             "report_time": report_time_edit.strftime("%H:%M:%S"),
                             "created_at": created_at_str,
                             "image_before": img_before_b64,
+                            "received_no": received_no_input.strip(),
+                            "received_date": str(received_date_input) if received_no_input else "",
+                            "received_time": received_time_input.strftime("%H:%M:%S") if received_no_input else "",
+                            "received_at": received_at_str,
                             "status": new_status,
                             "technician": technician_name,
                             "cause": cause_input,
@@ -514,7 +571,7 @@ with tab2:
                         
                         try:
                             supabase.table("tickets").update(update_data).eq("id", ticket["id"]).execute()
-                            st.success(f"✅ อัปเดตข้อมูลใบแจ้งซ่อม **{ticket_no_edit}** เรียบร้อยแล้ว!")
+                            st.success(f"✅ อัปเดตข้อมูลใบแจ้งซ่อม **{ticket_no_edit}** (เลขที่รับ: **{received_no_input}**) เรียบร้อยแล้ว!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
@@ -533,7 +590,11 @@ with tab3:
         def calc_repair_time(row):
             if row["status"] == "เสร็จสิ้น" and pd.notna(row.get("completed_date")):
                 try:
-                    start_dt = pd.to_datetime(f"{row['report_date']} {row['report_time']}")
+                    # คำนวณระยะเวลาตั้งแต่วันที่รับงาน (หรือวันที่แจ้งกรณีที่ไม่มีรับงาน) ถึงวันที่เสร็จ
+                    s_date = row['received_date'] if pd.notna(row.get('received_date')) and str(row.get('received_date')).strip() != "" else row['report_date']
+                    s_time = row['received_time'] if pd.notna(row.get('received_time')) and str(row.get('received_time')).strip() != "" else row['report_time']
+                    
+                    start_dt = pd.to_datetime(f"{s_date} {s_time}")
                     end_dt = pd.to_datetime(f"{row['completed_date']} {row['completed_time']}")
                     if end_dt >= start_dt:
                         return end_dt - start_dt
@@ -600,17 +661,17 @@ with tab3:
         df_stats["รูปถ่ายหลังซ่อม"] = df_stats["image_after"].apply(count_img_status)
         
         report_cols = [
-            "ticket_no", "reporter", "job_type", "department", "equipment", 
-            "description", "status", "report_date", "report_time", "technician", 
-            "cause", "solution", "parts_used", "parts_qty", "completed_date", 
+            "ticket_no", "received_no", "reporter", "job_type", "department", "equipment", 
+            "description", "status", "report_date", "report_time", "received_date", "received_time",
+            "technician", "cause", "solution", "parts_used", "parts_qty", "completed_date", 
             "completed_time", "ระยะเวลาซ่อมรวม", "รูปถ่ายก่อนซ่อม", "รูปถ่ายหลังซ่อม"
         ]
         
         completed_df_display = df_stats[report_cols].copy()
         completed_df_display.columns = [
-            "เลขที่ใบแจ้งซ่อม", "ผู้แจ้ง", "ประเภทงาน", "แผนก", "อุปกรณ์", 
-            "อาการเสีย / รายละเอียด", "สถานะ", "วันที่แจ้ง", "เวลาแจ้ง", "ช่างผู้ซ่อม", 
-            "สาเหตุ", "วิธีแก้ไข", "อะไหล่ที่ใช้", "จำนวน", "วันที่เสร็จ", 
+            "เลขที่ใบแจ้งซ่อม", "เลขที่รับ", "ผู้แจ้ง", "ประเภทงาน", "แผนก", "อุปกรณ์", 
+            "อาการเสีย / รายละเอียด", "สถานะ", "วันที่แจ้ง", "เวลาแจ้ง", "วันที่รับ", "เวลาที่รับ",
+            "ช่างผู้ซ่อม", "สาเหตุ", "วิธีแก้ไข", "อะไหล่ที่ใช้", "จำนวน", "วันที่เสร็จ", 
             "เวลาเสร็จ", "ระยะเวลาซ่อมรวม", "รูปก่อนซ่อม", "รูปหลังซ่อม"
         ]
         
