@@ -77,9 +77,10 @@ def format_timedelta(td):
     return " ".join(parts)
 
 # -------------------------------------------------------------
-# Helper Functions จัดการรูปภาพและวิดีโอ (Media Handling)
+# Helper Functions จัดการรูปภาพและวิดีโอ (ปรับขนาดเล็กลง)
 # -------------------------------------------------------------
-def compress_and_to_base64(image_bytes, max_size=(600, 600), quality=60):
+def compress_and_to_base64(image_bytes, max_size=(300, 300), quality=50):
+    """ย่อขนาดรูปภาพให้เล็กลง (300x300px) เพื่อประหยัดพื้นที่และโหลดไว"""
     if not image_bytes:
         return ""
     try:
@@ -93,7 +94,7 @@ def compress_and_to_base64(image_bytes, max_size=(600, 600), quality=60):
     except Exception:
         return ""
 
-def process_media_files(file_list, max_size=(600, 600), quality=60):
+def process_media_files(file_list, max_size=(300, 300), quality=50):
     """แปลงไฟล์รูปภาพและวิดีโอให้อยู่ในรูปแบบ Base64 JSON List"""
     if not file_list:
         return ""
@@ -107,7 +108,7 @@ def process_media_files(file_list, max_size=(600, 600), quality=60):
         else:
             continue
             
-        # ตรวจสอบว่าเป็นไฟล์วิดีโอหรือไม่
+        # ตรวจสอบประเภทวิดีโอ
         if any(filename.endswith(ext) for ext in ['.mp4', '.mov', '.avi', '.mkv']):
             mime = "video/mp4"
             if filename.endswith(".mov"): mime = "video/quicktime"
@@ -117,7 +118,7 @@ def process_media_files(file_list, max_size=(600, 600), quality=60):
             b64_str = base64.b64encode(file_bytes).decode('utf-8')
             media_list.append(f"data:{mime};base64,{b64_str}")
         else:
-            # ประมวลผลรูปภาพ (ย่อขนาด & บีบอัด)
+            # ประมวลผลรูปภาพ (ย่อขนาดเล็กลง)
             b64_str = compress_and_to_base64(file_bytes, max_size=max_size, quality=quality)
             if b64_str:
                 media_list.append(f"data:image/jpeg;base64,{b64_str}")
@@ -148,14 +149,19 @@ def get_image_list_from_b64(b64_val):
     return [s]
 
 def display_media_gallery(b64_val, title="📸/🎥 สื่อประกอบ (รูปถ่าย / วิดีโอ)"):
+    """แสดงรูปและวิดีโอขนาดกะทัดรัด (จัดเป็น Grid 5 ช่อง ล็อคไม่ให้ขยายใหญ่เต็มจอ)"""
     media_list = get_image_list_from_b64(b64_val)
     if not media_list:
         return
         
     st.markdown(f"**{title} ({len(media_list)} รายการ):**")
-    cols = st.columns(min(len(media_list), 4))
+    
+    # กำหนดจำนวนคอลัมน์เป็น 5 ช่องเสมอ เพื่อจำกัดขนาดของวิดีโอ/รูป ไม่ให้ใหญ่เกินไป
+    MAX_COLS = 5
+    cols = st.columns(MAX_COLS)
+    
     for idx, item in enumerate(media_list):
-        with cols[idx % 4]:
+        with cols[idx % MAX_COLS]:
             if "video" in item or item.startswith("data:video"):
                 st.video(item)
             else:
