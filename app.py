@@ -77,7 +77,7 @@ def format_timedelta(td):
     return " ".join(parts)
 
 # -------------------------------------------------------------
-# Helper Functions สำหรับจัดการรูปภาพหลายรูป & การแต่งสีตาราง
+# Helper Functions จัดการรูปภาพและวิดีโอ (Media Handling)
 # -------------------------------------------------------------
 def compress_and_to_base64(image_bytes, max_size=(600, 600), quality=60):
     if not image_bytes:
@@ -93,27 +93,43 @@ def compress_and_to_base64(image_bytes, max_size=(600, 600), quality=60):
     except Exception:
         return ""
 
-def compress_multiple_to_json(file_list, max_size=(600, 600), quality=60):
+def process_media_files(file_list, max_size=(600, 600), quality=60):
+    """แปลงไฟล์รูปภาพและวิดีโอให้อยู่ในรูปแบบ Base64 JSON List"""
     if not file_list:
         return ""
-    b64_list = []
+    media_list = []
     for file in file_list:
+        filename = getattr(file, 'name', '').lower()
         if hasattr(file, 'getvalue'):
-            img_bytes = file.getvalue()
+            file_bytes = file.getvalue()
         elif isinstance(file, bytes):
-            img_bytes = file
+            file_bytes = file
         else:
             continue
-        b64_str = compress_and_to_base64(img_bytes, max_size=max_size, quality=quality)
-        if b64_str:
-            b64_list.append(b64_str)
-    return json.dumps(b64_list) if b64_list else ""
+            
+        # ตรวจสอบว่าเป็นไฟล์วิดีโอหรือไม่
+        if any(filename.endswith(ext) for ext in ['.mp4', '.mov', '.avi', '.mkv']):
+            mime = "video/mp4"
+            if filename.endswith(".mov"): mime = "video/quicktime"
+            elif filename.endswith(".avi"): mime = "video/x-msvideo"
+            elif filename.endswith(".mkv"): mime = "video/x-matroska"
+            
+            b64_str = base64.b64encode(file_bytes).decode('utf-8')
+            media_list.append(f"data:{mime};base64,{b64_str}")
+        else:
+            # ประมวลผลรูปภาพ (ย่อขนาด & บีบอัด)
+            b64_str = compress_and_to_base64(file_bytes, max_size=max_size, quality=quality)
+            if b64_str:
+                media_list.append(f"data:image/jpeg;base64,{b64_str}")
+                
+    return json.dumps(media_list) if media_list else ""
 
 def base64_to_image(b64_str):
     if not b64_str or pd.isna(b64_str) or str(b64_str).strip() == "":
         return None
     try:
-        img_bytes = base64.b64decode(str(b64_str))
+        raw_b64 = str(b64_str).split(",")[-1]
+        img_bytes = base64.b64decode(raw_b64)
         return Image.open(io.BytesIO(img_bytes))
     except Exception:
         return None
@@ -131,17 +147,21 @@ def get_image_list_from_b64(b64_val):
             pass
     return [s]
 
-def display_image_gallery(b64_val, title="🖼️ รูปถ่าย"):
-    b64_list = get_image_list_from_b64(b64_val)
-    images = [base64_to_image(x) for x in b64_list]
-    images = [img for img in images if img is not None]
-    
-    if images:
-        st.markdown(f"**{title} ({len(images)} รูป):**")
-        cols = st.columns(min(len(images), 4))
-        for idx, img in enumerate(images):
-            with cols[idx % 4]:
-                st.image(img, use_container_width=True)
+def display_media_gallery(b64_val, title="📸/🎥 สื่อประกอบ (รูปถ่าย / วิดีโอ)"):
+    media_list = get_image_list_from_b64(b64_val)
+    if not media_list:
+        return
+        
+    st.markdown(f"**{title} ({len(media_list)} รายการ):**")
+    cols = st.columns(min(len(media_list), 4))
+    for idx, item in enumerate(media_list):
+        with cols[idx % 4]:
+            if "video" in item or item.startswith("data:video"):
+                st.video(item)
+            else:
+                img = base64_to_image(item)
+                if img:
+                    st.image(img, use_container_width=True)
 
 def style_status(val):
     if val == "เสร็จสิ้น":
@@ -286,11 +306,12 @@ with tab1:
             
         priority = st.select_slider("ระดับความเร่งด่วน", options=["ปกติ", "ด่วน", "ด่วนที่สุด"], value="ปกติ")
         
-        uploaded_images_b = st.file_uploader(
-            "📸 อัปโหลดรูปถ่ายก่อนซ่อม / อาการเสีย (เลือกได้หลายรูป)", 
-            type=["jpg", "jpeg", "png"],
+        uploaded_media_b = st.file_uploader(
+            "📸/🎥 อัปโหลดรูปถ่ายหรือวิดีโอก่อนซ่อม (เลือกได้หลายไฟล์: .jpg, .png, .mp4, .mov)", 
+            type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
             accept_multiple_files=True
         )
+        st.caption("💡 แนะนำให้ใช้วิดีโอสั้น (ไม่เกิน 15-20 MB) เพื่อความรวดเร็วในการประมวลผล")
         
         submitted = st.form_submit_button("💾 บันทึกใบแจ้งซ่อม", use_container_width=True)
         
@@ -304,7 +325,7 @@ with tab1:
                 if check_dup.data:
                     st.error(f"❌ เลขที่ใบแจ้งซ่อม '{ticket_no.strip()}' มีในระบบแล้ว กรุณาใช้เลขอื่น")
                 else:
-                    image_b64 = compress_multiple_to_json(uploaded_images_b) if uploaded_images_b else ""
+                    media_b64 = process_media_files(uploaded_media_b) if uploaded_media_b else ""
                     created_at_str = datetime.combine(report_date, report_time).replace(tzinfo=THAILAND_TZ).isoformat()
                     
                     new_data = {
@@ -319,7 +340,7 @@ with tab1:
                         "report_date": str(report_date),
                         "report_time": report_time.strftime("%H:%M:%S"),
                         "created_at": created_at_str,
-                        "image_before": image_b64
+                        "image_before": media_b64
                     }
                     
                     try:
@@ -437,11 +458,11 @@ with tab2:
                 with col_rt:
                     report_time_edit = st.time_input("⏰ เวลาที่แจ้ง", value=init_rep_time)
                 
-                display_image_gallery(ticket.get("image_before", ""), title="🖼️ รูปถ่ายก่อนซ่อมปัจจุบัน")
+                display_media_gallery(ticket.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนซ่อมปัจจุบัน")
                 
-                uploaded_images_b_new = st.file_uploader(
-                    "📸 เปลี่ยน/อัปโหลดเพิ่ม รูปถ่ายก่อนซ่อม (เลือกได้หลายรูป)",
-                    type=["jpg", "jpeg", "png"],
+                uploaded_media_b_new = st.file_uploader(
+                    "📸/🎥 เปลี่ยน/อัปโหลดเพิ่ม รูปหรือวิดีโอก่อนซ่อม",
+                    type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
                     accept_multiple_files=True,
                     key="edit_img_b"
                 )
@@ -507,11 +528,11 @@ with tab2:
                 with col_ct:
                     completed_time = st.time_input("⏰ เวลาที่ซ่อมเสร็จ", value=init_comp_time)
                 
-                display_image_gallery(ticket.get("image_after", ""), title="🖼️ รูปถ่ายหลังซ่อมปัจจุบัน")
+                display_media_gallery(ticket.get("image_after", ""), title="📸/🎥 สื่อประกอบหลังซ่อมปัจจุบัน")
                 
-                uploaded_images_a_new = st.file_uploader(
-                    "📸 อัปโหลด/เปลี่ยน รูปถ่ายหลังซ่อมเสร็จ (เลือกได้หลายรูป)",
-                    type=["jpg", "jpeg", "png"],
+                uploaded_media_a_new = st.file_uploader(
+                    "📸/🎥 อัปโหลด/เปลี่ยน รูปหรือวิดีโอหลังซ่อมเสร็จ",
+                    type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
                     accept_multiple_files=True,
                     key="edit_img_a"
                 )
@@ -522,13 +543,13 @@ with tab2:
                     if not supabase:
                         st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
                     else:
-                        if uploaded_images_b_new:
-                            img_before_b64 = compress_multiple_to_json(uploaded_images_b_new)
+                        if uploaded_media_b_new:
+                            img_before_b64 = process_media_files(uploaded_media_b_new)
                         else:
                             img_before_b64 = str(ticket.get("image_before", "") or "")
                             
-                        if uploaded_images_a_new:
-                            img_after_b64 = compress_multiple_to_json(uploaded_images_a_new)
+                        if uploaded_media_a_new:
+                            img_after_b64 = process_media_files(uploaded_media_a_new)
                         else:
                             img_after_b64 = str(ticket.get("image_after", "") or "")
                             
@@ -803,7 +824,6 @@ with tab3:
                         if i < len(q_lines):
                             qty_val_raw = re.sub(r'^\d+[\.\)]\s*|^[-\*]\s*', '', q_lines[i]).strip()
                         
-                        # ดึงเฉพาะตัวเลขจำนวน และ หน่วย ออกจากข้อความ
                         num_val = 1.0
                         unit_str = ""
                         if qty_val_raw and qty_val_raw != "-":
@@ -887,18 +907,18 @@ with tab3:
             st.markdown("---")
             st.markdown("### 📄 ตารางรายงานสรุปงานซ่อม (เรียงตามวันที่แจ้ง)")
             
-            def count_img_status(val):
-                imgs = get_image_list_from_b64(val)
-                return f"มี {len(imgs)} รูป" if imgs else "ไม่มี"
+            def count_media_status(val):
+                items = get_image_list_from_b64(val)
+                return f"มี {len(items)} ไฟล์" if items else "ไม่มี"
                 
-            df_stats["รูปถ่ายก่อนซ่อม"] = df_stats["image_before"].apply(count_img_status)
-            df_stats["รูปถ่ายหลังซ่อม"] = df_stats["image_after"].apply(count_img_status)
+            df_stats["ไฟล์ประกอบก่อนซ่อม"] = df_stats["image_before"].apply(count_media_status)
+            df_stats["ไฟล์ประกอบหลังซ่อม"] = df_stats["image_after"].apply(count_media_status)
             
             report_cols = [
                 "ticket_no", "received_no", "reporter", "job_type", "department", "equipment", 
                 "description", "status", "report_date", "report_time", "received_date", "received_time",
                 "technician", "cause", "solution", "parts_used", "parts_qty", "completed_date", 
-                "completed_time", "ระยะเวลาซ่อมรวม", "รูปถ่ายก่อนซ่อม", "รูปถ่ายหลังซ่อม"
+                "completed_time", "ระยะเวลาซ่อมรวม", "ไฟล์ประกอบก่อนซ่อม", "ไฟล์ประกอบหลังซ่อม"
             ]
             
             completed_df_display = df_stats[report_cols].copy()
@@ -906,7 +926,7 @@ with tab3:
                 "เลขที่ใบแจ้งซ่อม", "เลขที่รับ", "ผู้แจ้ง", "ประเภทงาน", "แผนก", "อุปกรณ์", 
                 "อาการเสีย / รายละเอียด", "สถานะ", "วันที่แจ้ง", "เวลาแจ้ง", "วันที่รับ", "เวลาที่รับ",
                 "ช่างผู้ซ่อม", "สาเหตุ", "วิธีแก้ไข", "อะไหล่ที่ใช้", "จำนวน", "วันที่เสร็จ", 
-                "เวลาเสร็จ", "ระยะเวลาซ่อมรวม", "รูปก่อนซ่อม", "รูปหลังซ่อม"
+                "เวลาเสร็จ", "ระยะเวลาซ่อมรวม", "สื่อก่อนซ่อม", "สื่อหลังซ่อม"
             ]
             
             st.dataframe(apply_status_style(completed_df_display), use_container_width=True)
@@ -998,6 +1018,6 @@ with tab3:
                         st.markdown("---")
                         col_img1, col_img2 = st.columns(2)
                         with col_img1:
-                            display_image_gallery(t_detail.get("image_before", ""), title="📸 รูปถ่ายก่อนซ่อม (Before)")
+                            display_media_gallery(t_detail.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนซ่อม (Before)")
                         with col_img2:
-                            display_image_gallery(t_detail.get("image_after", ""), title="📸 รูปถ่ายหลังซ่อม (After)")
+                            display_media_gallery(t_detail.get("image_after", ""), title="📸/🎥 สื่อประกอบหลังซ่อม (After)")
