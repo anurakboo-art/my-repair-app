@@ -156,7 +156,6 @@ def display_media_gallery(b64_val, title="📸/🎥 สื่อประกอ�
         
     st.markdown(f"**{title} ({len(media_list)} รายการ):**")
     
-    # กำหนดจำนวนคอลัมน์เป็น 5 ช่องเสมอ เพื่อจำกัดขนาดของวิดีโอ/รูป ไม่ให้ใหญ่เกินไป
     MAX_COLS = 5
     cols = st.columns(MAX_COLS)
     
@@ -715,6 +714,9 @@ with tab3:
             
             st.markdown("---")
             
+            # -------------------------------------------------------------
+            # แถวที่ 1: กราฟงานค้างสะสม + กราฟสัดส่วนสถานะงาน
+            # -------------------------------------------------------------
             col_g1, col_g2 = st.columns(2)
             with col_g1:
                 st.markdown("##### 🕒 กราฟงานค้างสะสมแยกตามอายุงาน (ยังไม่เสร็จ)")
@@ -783,6 +785,51 @@ with tab3:
                 fig_status = px.pie(status_counts, names="สถานะ", values="จำนวน", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
                 st.plotly_chart(fig_status, use_container_width=True)
 
+            # -------------------------------------------------------------
+            # แถวที่ 2: กราฟวิเคราะห์ประเภทงาน (แจ้งซ่อม VS PM) [ส่วนที่เพิ่มใหม่]
+            # -------------------------------------------------------------
+            col_g5, col_g6 = st.columns(2)
+            with col_g5:
+                st.markdown("##### 🛠️ สัดส่วนประเภทงาน (แจ้งซ่อม VS PM)")
+                job_type_counts = df_stats["job_type"].value_counts().reset_index()
+                job_type_counts.columns = ["ประเภทงาน", "จำนวน"]
+                fig_job_type = px.pie(
+                    job_type_counts, 
+                    names="ประเภทงาน", 
+                    values="จำนวน", 
+                    hole=0.4, 
+                    color="ประเภทงาน",
+                    color_discrete_map={"แจ้งซ่อม": "#3498db", "PM": "#2ecc71"}
+                )
+                fig_job_type.update_traces(textinfo='percent+label+value')
+                st.plotly_chart(fig_job_type, use_container_width=True)
+
+            with col_g6:
+                st.markdown("##### 📅 สถานะงานประเภท PM แยกตามแผนก")
+                df_pm = df_stats[df_stats["job_type"] == "PM"]
+                if df_pm.empty:
+                    st.info("ℹ️ ไม่พบข้อมูลงานประเภท PM ในช่วงเวลาที่เลือก")
+                else:
+                    pm_dept_status = df_pm.groupby(["department", "status"]).size().reset_index(name="จำนวน")
+                    fig_pm_dept = px.bar(
+                        pm_dept_status, 
+                        x="department", 
+                        y="จำนวน", 
+                        color="status", 
+                        barmode="stack",
+                        color_discrete_map={
+                            "เสร็จสิ้น": "#2ecc71",
+                            "กำลังดำเนินการ": "#3498db",
+                            "รอดำเนินการ": "#f1c40f",
+                            "ยกเลิก": "#e74c3c"
+                        }
+                    )
+                    fig_pm_dept.update_layout(xaxis_title="แผนก / โซน", yaxis_title="จำนวนงาน PM")
+                    st.plotly_chart(fig_pm_dept, use_container_width=True)
+
+            # -------------------------------------------------------------
+            # แถวที่ 3: กราฟความเร่งด่วน + กราฟแยกตามแผนก
+            # -------------------------------------------------------------
             col_g3, col_g4 = st.columns(2)
             with col_g3:
                 st.markdown("##### 🚨 สัดส่วนระดับความเร่งด่วน")
@@ -792,7 +839,7 @@ with tab3:
                 st.plotly_chart(fig_prio, use_container_width=True)
                 
             with col_g4:
-                st.markdown("##### 🏢 จำนวนงานแยกตามแผนก")
+                st.markdown("##### 🏢 จำนวนงานรวมแยกตามแผนก")
                 dept_counts = df_stats["department"].value_counts().reset_index()
                 dept_counts.columns = ["แผนก", "จำนวน"]
                 fig_dept = px.bar(
@@ -955,11 +1002,12 @@ with tab3:
             if not df_stats.empty:
                 df_recent = df_stats.tail(10).iloc[::-1].copy()
 
-                recent_cols = ["ticket_no", "reporter", "equipment", "status", "technician"]
+                recent_cols = ["ticket_no", "reporter", "job_type", "equipment", "status", "technician"]
                 df_recent_display = df_recent[recent_cols].copy()
                 df_recent_display.columns = [
                     "เลขที่ใบแจ้งซ่อม (Ticket)", 
                     "ชื่อผู้แจ้ง", 
+                    "ประเภทงาน",
                     "อุปกรณ์ / เครื่องจักร", 
                     "สถานะ", 
                     "ช่างผู้รับผิดชอบ"
