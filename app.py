@@ -24,7 +24,6 @@ def get_supabase_client():
 
 supabase = get_supabase_client()
 
-# กำหนดโซนเวลาประเทศไทย (UTC+7)
 THAILAND_TZ = timezone(timedelta(hours=7))
 
 def get_thailand_now_dt():
@@ -150,7 +149,6 @@ def display_media_gallery(b64_val, title="📸/🎥 สื่อประกอ�
         return
         
     st.markdown(f"**{title} ({len(media_list)} รายการ):**")
-    
     MAX_COLS = 4
     cols = st.columns(MAX_COLS)
     
@@ -184,22 +182,19 @@ def apply_status_style(df_input):
 
 DEFAULT_DEPTS = ["สีฝุ่น", "สีน้ำมัน", "โซน 2"]
 
-COLUMN_NAMES = [
-    "id", "ticket_no", "reporter", "job_type", "department", "equipment", 
-    "description", "priority", "status", "report_date", "report_time", 
-    "created_at", "image_before", "received_no", "received_date", "received_time", 
-    "technician", "detected_symptom", "cause", "solution", "parts_used", "parts_qty", 
-    "completed_date", "completed_time", "completed_at", "image_after"
-]
+# คอลัมน์ที่ไม่รวม Base64 รูปภาพ เพื่อป้องกัน Timeout
+LIGHT_COLUMNS = "id, ticket_no, reporter, job_type, department, equipment, description, priority, status, report_date, report_time, created_at, received_no, received_date, received_time, technician, detected_symptom, cause, solution, parts_used, parts_qty, completed_date, completed_time, completed_at"
+COLUMN_NAMES = LIGHT_COLUMNS.split(", ")
 
 # -------------------------------------------------------------
-# Database Loader Functions
+# Database Loader Functions (ปรับแก้คำสั่ง Query ให้เบาลง)
 # -------------------------------------------------------------
 def load_data_by_table(table_name="tickets", job_type_filter=None):
     if not supabase:
         return pd.DataFrame(columns=COLUMN_NAMES)
     try:
-        res = supabase.table(table_name).select("*").execute()
+        # เลือกดึงเฉพาะ Light Columns ไม่ดึง image_before / image_after ในตารางรวม
+        res = supabase.table(table_name).select(LIGHT_COLUMNS).execute()
         df = pd.DataFrame(res.data)
         if df.empty:
             return pd.DataFrame(columns=COLUMN_NAMES)
@@ -212,24 +207,21 @@ def load_data_by_table(table_name="tickets", job_type_filter=None):
         df["sort_dt"] = pd.to_datetime(df["report_date"].astype(str) + " " + df["report_time"].astype(str).fillna("00:00:00"), errors='coerce')
         df = df.sort_values(by=["sort_dt", "created_at"], ascending=[True, True]).drop(columns=["sort_dt"])
         return df
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูล: {e}")
+        return pd.DataFrame(columns=COLUMN_NAMES)
+
+def fetch_single_ticket_media(table_name, record_id):
+    """ดึงไฟล์รูปภาพเฉพาะรายการที่ระบุ เพื่อป้องกัน Timeout"""
+    if not supabase or not record_id:
+        return "", ""
+    try:
+        res = supabase.table(table_name).select("image_before, image_after").eq("id", record_id).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0].get("image_before", "") or "", res.data[0].get("image_after", "") or ""
     except Exception:
-        try:
-            res = supabase.table("tickets").select("*").execute()
-            df = pd.DataFrame(res.data)
-            if df.empty:
-                return pd.DataFrame(columns=COLUMN_NAMES)
-            for c in COLUMN_NAMES:
-                if c not in df.columns:
-                    df[c] = ""
-            if job_type_filter:
-                df = df[df["job_type"] == job_type_filter]
-            
-            df["sort_dt"] = pd.to_datetime(df["report_date"].astype(str) + " " + df["report_time"].astype(str).fillna("00:00:00"), errors='coerce')
-            df = df.sort_values(by=["sort_dt", "created_at"], ascending=[True, True]).drop(columns=["sort_dt"])
-            return df
-        except Exception as e:
-            st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูล: {e}")
-            return pd.DataFrame(columns=COLUMN_NAMES)
+        pass
+    return "", ""
 
 def save_data_to_supabase(primary_table, data):
     try:
@@ -284,7 +276,7 @@ def generate_default_received_no(df):
     return f"{prefix}{max_num + 1:03d}"
 
 # -------------------------------------------------------------
-# โหลดข้อมูลแยกส่วน
+# โหลดข้อมูล
 # -------------------------------------------------------------
 df_repair = load_data_by_table("repair_tickets", job_type_filter="แจ้งซ่อม")
 df_pm = load_data_by_table("pm_tickets", job_type_filter="PM")
@@ -438,6 +430,9 @@ with tab2:
             selected_ticket_no = st.selectbox("เลือกเลขที่ใบแจ้งซ่อมเพื่อจัดการ:", ticket_list, key="sel_rep_ticket")
             ticket = df_repair[df_repair["ticket_no"] == selected_ticket_no].iloc[0]
             
+            # ดึงเฉพาะไฟล์รูปของตั๋วนี้เพื่อป้องกัน Timeout
+            curr_img_before, curr_img_after = fetch_single_ticket_media("repair_tickets", ticket["id"])
+            
             with st.form("update_repair_form"):
                 st.markdown("#### 1️⃣ ข้อมูลการแจ้งซ่อม (ฝั่งผู้แจ้ง)")
                 col_e0, col_e1, col_e3, col_e4 = st.columns(4)
@@ -483,7 +478,7 @@ with tab2:
                 with col_rt:
                     report_time_edit = st.time_input("⏰ เวลาที่แจ้ง", value=init_rep_time, key="edit_rep_time")
                 
-                display_media_gallery(ticket.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนซ่อมปัจจุบัน")
+                display_media_gallery(curr_img_before, title="📸/🎥 สื่อประกอบก่อนซ่อมปัจจุบัน")
                 
                 uploaded_media_b_new = st.file_uploader(
                     "📸/🎥 เปลี่ยน/อัปโหลดเพิ่ม รูปหรือวิดีโอก่อนซ่อม",
@@ -545,7 +540,7 @@ with tab2:
                 with col_ct:
                     completed_time = st.time_input("⏰ เวลาที่ซ่อมเสร็จ", value=init_comp_time, key="rep_comp_time")
                 
-                display_media_gallery(ticket.get("image_after", ""), title="📸/🎥 สื่อประกอบหลังซ่อมปัจจุบัน")
+                display_media_gallery(curr_img_after, title="📸/🎥 สื่อประกอบหลังซ่อมปัจจุบัน")
                 
                 uploaded_media_a_new = st.file_uploader(
                     "📸/🎥 อัปโหลด/เปลี่ยน รูปหรือวิดีโอหลังซ่อมเสร็จ",
@@ -560,8 +555,8 @@ with tab2:
                     if not supabase:
                         st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
                     else:
-                        img_before_b64 = process_media_files(uploaded_media_b_new) if uploaded_media_b_new else str(ticket.get("image_before", "") or "")
-                        img_after_b64 = process_media_files(uploaded_media_a_new) if uploaded_media_a_new else str(ticket.get("image_after", "") or "")
+                        img_before_b64 = process_media_files(uploaded_media_b_new) if uploaded_media_b_new else curr_img_before
+                        img_after_b64 = process_media_files(uploaded_media_a_new) if uploaded_media_a_new else curr_img_after
                             
                         completed_at_str = None
                         comp_date_str = None
@@ -724,10 +719,9 @@ with tab3:
 # =============================================================
 with tab4:
     st.subheader("📅 แผนงาน PM & บันทึกข้อมูลก่อนทำ (PM - Before Action)")
-    st.caption("ระบบวางแผนการบำรุงรักษาเชิงป้องกัน (PM) และบันทึกรูปถ่าย/วิดีโอสภาพเครื่องจักรก่อนทำ PM (แยกจากงานแจ้งซ่อม)")
+    st.caption("ระบบวางแผนการบำรุงรักษาเชิงป้องกัน (PM) และบันทึกรูปถ่าย/วิดีโอสภาพเครื่องจักรก่อนทำ PM")
     
     col_pm1, col_pm2 = st.columns([1, 2])
-    
     now_dt_pm = get_thailand_now_dt()
     
     with col_pm1:
@@ -818,7 +812,8 @@ with tab4:
                 
                 if selected_pm_ticket:
                     pm_item = df_pm_show[df_pm_show["ticket_no"] == selected_pm_ticket].iloc[0]
-                    display_media_gallery(pm_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM (Before Action)")
+                    pm_b_img, _ = fetch_single_ticket_media("pm_tickets", pm_item["id"])
+                    display_media_gallery(pm_b_img, title="📸/🎥 สื่อประกอบก่อนทำ PM (Before Action)")
 
 # =============================================================
 # TAB 5: บันทึกผล PM & ตรวจสอบหลังทำ (PM Only)
@@ -833,7 +828,6 @@ with tab5:
         "📊 ตารางประวัติงาน PM ทั้งหมด"
     ])
 
-    # Sub-tab 1: บันทึกผลการทำ PM
     with st_sub1:
         st.markdown("#### 🛠️ บันทึกผลการดำเนินงาน PM / ปิดงาน (หลังทำ)")
         
@@ -851,6 +845,7 @@ with tab5:
             
             if selected_after_ticket:
                 target_item = df_pm[df_pm["ticket_no"] == selected_after_ticket].iloc[0]
+                _, curr_pm_after_img = fetch_single_ticket_media("pm_tickets", target_item["id"])
                 
                 st.info(f"📌 **ใบงาน PM:** {target_item.get('ticket_no')} | **อุปกรณ์:** {target_item.get('equipment')} | **แผนก:** {target_item.get('department')}")
                 
@@ -881,7 +876,7 @@ with tab5:
                     st.markdown("---")
                     st.markdown("#### 📸/🎥 อัปโหลดรูปภาพ / วิดีโอ **หลังทำ PM (After Action)**")
                     
-                    display_media_gallery(target_item.get("image_after", ""), title="สื่อประกอบหลังทำปัจจุบัน")
+                    display_media_gallery(curr_pm_after_img, title="สื่อประกอบหลังทำปัจจุบัน")
                     
                     uploaded_pm_media_after = st.file_uploader(
                         "📸/🎥 อัปโหลดรูปถ่ายหรือวิดีโอผลงาน (หลังทำ PM)", 
@@ -898,7 +893,7 @@ with tab5:
                         elif not supabase:
                             st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
                         else:
-                            media_after_b64 = process_media_files(uploaded_pm_media_after) if uploaded_pm_media_after else str(target_item.get("image_after", "") or "")
+                            media_after_b64 = process_media_files(uploaded_pm_media_after) if uploaded_pm_media_after else curr_pm_after_img
                                 
                             c_at_str = None
                             c_d_str = None
@@ -929,7 +924,6 @@ with tab5:
                             except Exception as e:
                                 st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
 
-    # Sub-tab 2: เปรียบเทียบ Before vs After
     with st_sub2:
         st.markdown("#### 📸 เปรียบเทียบสื่อประกอบ Before VS After ของงาน PM")
         
@@ -944,17 +938,18 @@ with tab5:
             
             if compare_ticket_no:
                 c_item = df_pm[df_pm["ticket_no"] == compare_ticket_no].iloc[0]
+                c_before_img, c_after_img = fetch_single_ticket_media("pm_tickets", c_item["id"])
+                
                 st.markdown(f"**ใบงาน PM เลขที่:** `{c_item.get('ticket_no')}` | **อุปกรณ์:** {c_item.get('equipment')} | **สถานะ:** {c_item.get('status')}")
                 
                 col_comp1, col_comp2 = st.columns(2)
                 with col_comp1:
                     st.markdown("### 🔴 ก่อนทำ PM (Before Action)")
-                    display_media_gallery(c_item.get("image_before", ""), title="สื่อประกอบก่อนทำ PM")
+                    display_media_gallery(c_before_img, title="สื่อประกอบก่อนทำ PM")
                 with col_comp2:
                     st.markdown("### 🟢 หลังทำ PM (After Action)")
-                    display_media_gallery(c_item.get("image_after", ""), title="สื่อประกอบหลังทำ PM")
+                    display_media_gallery(c_after_img, title="สื่อประกอบหลังทำ PM")
 
-    # Sub-tab 3: สรุปประวัติงาน PM
     with st_sub3:
         st.markdown("#### 📜 ตารางสรุปผลงาน PM ทั้งหมด")
         if df_pm.empty:
