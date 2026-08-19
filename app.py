@@ -790,7 +790,7 @@ with tab3:
                 st.plotly_chart(fig_status, use_container_width=True)
 
 # =============================================================
-# TAB 4: แผนงาน PM & ปฏิทิน
+# TAB 4: แผนงาน PM & ปฏิทิน (ปรับปรุงรองรับรูปและวิดีโอหลายรายการ)
 # =============================================================
 with tab4:
     st.subheader("📅 ตารางวางแผนการบำรุงรักษาเชิงป้องกัน (PM Schedule)")
@@ -813,6 +813,15 @@ with tab4:
             pm_next_date = st.date_input("📅 วันที่กำหนดทำ PM ครั้งถัดไป", value=get_thailand_now_dt().date())
             pm_note = st.text_area("รายละเอียดการตรวจเช็ก (Checklist)", placeholder="- เช็กน้ำมันเครื่อง\n- ทำความสะอาดฟิลเตอร์")
             
+            # --- ช่องอัปโหลดรูปภาพและวิดีโอประกอบแผน PM ---
+            uploaded_pm_media = st.file_uploader(
+                "📸/🎥 อัปโหลดรูปถ่ายหรือวิดีโอประกอบแผน PM (เลือกได้หลายไฟล์)", 
+                type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
+                accept_multiple_files=True,
+                key="pm_media_upload"
+            )
+            st.caption("💡 รองรับทั้งรูปภาพถ่ายและวิดีโอสั้น (.mp4, .mov)")
+            
             btn_save_pm = st.form_submit_button("💾 บันทึกแผน PM", use_container_width=True)
             if btn_save_pm:
                 if not pm_equip.strip():
@@ -821,6 +830,8 @@ with tab4:
                     st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
                 else:
                     pm_ticket_no = generate_default_ticket_no(df)
+                    pm_media_b64 = process_media_files(uploaded_pm_media) if uploaded_pm_media else ""
+                    
                     new_pm_data = {
                         "ticket_no": pm_ticket_no,
                         "reporter": "ระบบวางแผน PM",
@@ -832,7 +843,8 @@ with tab4:
                         "status": "รอดำเนินการ",
                         "report_date": str(pm_next_date),
                         "report_time": "08:00:00",
-                        "created_at": datetime.combine(pm_next_date, datetime.min.time()).replace(tzinfo=THAILAND_TZ).isoformat()
+                        "created_at": datetime.combine(pm_next_date, datetime.min.time()).replace(tzinfo=THAILAND_TZ).isoformat(),
+                        "image_before": pm_media_b64
                     }
                     try:
                         supabase.table("tickets").insert(new_pm_data).execute()
@@ -858,8 +870,21 @@ with tab4:
                 
                 st.dataframe(apply_status_style(df_pm_view), use_container_width=True)
 
+                st.markdown("---")
+                st.markdown("#### 🔍 ตรวจสอบสื่อประกอบ (รูปถ่าย / วิดีโอ) งาน PM")
+                selected_pm_ticket = st.selectbox(
+                    "เลือกเลขที่ใบงาน PM เพื่อดูรูปภาพ/วิดีโอประกอบ:", 
+                    df_pm_show["ticket_no"].tolist(),
+                    key="select_pm_media_view"
+                )
+                
+                if selected_pm_ticket:
+                    pm_item = df_pm_show[df_pm_show["ticket_no"] == selected_pm_ticket].iloc[0]
+                    display_media_gallery(pm_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM / คลิปอ้างอิง")
+                    display_media_gallery(pm_item.get("image_after", ""), title="📸/🎥 สื่อประกอบหลังทำ PM เสร็จสิ้น")
+
 # =============================================================
-# TAB 5: สถานะการแก้ไขงาน & ติดตามงานซ่อม (ปรับปรุงตามคำขอ)
+# TAB 5: สถานะการแก้ไขงาน & ติดตามงานซ่อม
 # =============================================================
 with tab5:
     st.subheader("🔄 สถานะการแก้ไขงาน & ติดตามความก้าวหน้า (Work Edit Status)")
