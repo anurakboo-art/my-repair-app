@@ -316,7 +316,7 @@ with tab1:
     with st.form("repair_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
-            ticket_no = st.text_input("เลขที่ใบแจ้งซ่อม *", value=default_ticket_no, placeholder="เช่น REP-20260819-001")
+            ticket_no = st.text_input("ลำดับที่ *", value=default_ticket_no, placeholder="เช่น REP-20260819-001")
         with col2:
             reporter = st.text_input("ชื่อผู้แจ้ง *")
             
@@ -377,7 +377,7 @@ with tab1:
                 
                 try:
                     save_data_to_supabase("repair_tickets", new_data)
-                    st.success(f"✅ บันทึกใบแจ้งซ่อมเลขที่ **{ticket_no}** เรียบร้อยแล้ว!")
+                    st.success(f"✅ บันทึกใบแจ้งซ่อมลำดับที่ **{ticket_no}** เรียบร้อยแล้ว!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"เกิดข้อผิดพลาดในการบันทึกข้อมูล: {e}")
@@ -395,7 +395,7 @@ with tab2:
         with col_f1:
             status_filter = st.multiselect("กรองตามสถานะ", options=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "ยกเลิก"])
         with col_f2:
-            search_kw = st.text_input("🔍 ค้นหา (เลขใบแจ้งซ่อม / เลขที่รับ / ชื่อผู้แจ้ง / อุปกรณ์)", "", key="repair_search")
+            search_kw = st.text_input("🔍 ค้นหา (ลำดับที่ / เลขที่รับ / ชื่อผู้แจ้ง / อุปกรณ์)", "", key="repair_search")
             
         df_filtered = df_repair.copy()
         if status_filter:
@@ -421,7 +421,7 @@ with tab2:
         
         df_show = df_filtered[display_cols].copy()
         df_show.columns = [
-            "เลขที่ใบแจ้งซ่อม", "เลขที่รับ", "ผู้แจ้ง", "แผนก", "อุปกรณ์", 
+            "ลำดับที่", "เลขที่รับ", "ผู้แจ้ง", "แผนก", "อุปกรณ์", 
             "อาการเบื้องต้น", "ความเร่งด่วน", "สถานะ", "วันที่แจ้ง", "เวลาแจ้ง", 
             "วันที่รับ", "เวลาที่รับ", "ผู้ซ่อม", "อาการที่ตรวจพบ", "สาเหตุ", "การแก้ไข", "วันที่เสร็จ", "เวลาเสร็จ"
         ]
@@ -435,14 +435,14 @@ with tab2:
         if not ticket_list:
             st.warning("ไม่มีรายการตรงตามเงื่อนไขที่เลือก")
         else:
-            selected_ticket_no = st.selectbox("เลือกเลขที่ใบแจ้งซ่อมเพื่อจัดการ:", ticket_list, key="sel_rep_ticket")
+            selected_ticket_no = st.selectbox("เลือกลำดับที่เพื่อจัดการ:", ticket_list, key="sel_rep_ticket")
             ticket = df_repair[df_repair["ticket_no"] == selected_ticket_no].iloc[0]
             
             with st.form("update_repair_form"):
                 st.markdown("#### 1️⃣ ข้อมูลการแจ้งซ่อม (ฝั่งผู้แจ้ง)")
                 col_e0, col_e1, col_e3, col_e4 = st.columns(4)
                 with col_e0:
-                    ticket_no_edit = st.text_input("เลขที่ใบแจ้งซ่อม", value=str(ticket["ticket_no"] or ""))
+                    ticket_no_edit = st.text_input("ลำดับที่", value=str(ticket["ticket_no"] or ""))
                 with col_e1:
                     reporter_edit = st.text_input("ผู้แจ้งซ่อม", value=str(ticket["reporter"] or ""))
                 
@@ -604,7 +604,7 @@ with tab2:
                         
                         try:
                             update_data_in_supabase("repair_tickets", update_data, ticket["id"])
-                            st.success(f"✅ อัปเดตข้อมูลใบแจ้งซ่อม **{ticket_no_edit}** เรียบร้อยแล้ว!")
+                            st.success(f"✅ อัปเดตข้อมูลลำดับที่ **{ticket_no_edit}** เรียบร้อยแล้ว!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
@@ -735,7 +735,7 @@ with tab4:
         default_pm_no = generate_ticket_no(df_pm, prefix="PM-")
         
         with st.form("add_pm_plan_form", clear_on_submit=True):
-            pm_no = st.text_input("เลขที่ใบงาน PM *", value=default_pm_no)
+            pm_no = st.text_input("ลำดับที่ PM *", value=default_pm_no)
             pm_equip = st.text_input("อุปกรณ์ / เครื่องจักร *", placeholder="เช่น เครื่องอัดอากาศ No.1")
             
             existing_depts_pm = df_pm["department"].dropna().unique().tolist() if not df_pm.empty else []
@@ -763,7 +763,7 @@ with tab4:
             btn_save_pm = st.form_submit_button("💾 บันทึกแผน PM (ก่อนทำ)", use_container_width=True)
             if btn_save_pm:
                 if not pm_equip.strip() or not pm_no.strip():
-                    st.error("❌ กรุณาระบุเลขที่ใบงานและชื่ออุปกรณ์/เครื่องจักร")
+                    st.error("❌ กรุณาระบุลำดับที่และชื่ออุปกรณ์/เครื่องจักร")
                 elif not supabase:
                     st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
                 else:
@@ -786,7 +786,7 @@ with tab4:
                     }
                     try:
                         save_data_to_supabase("pm_tickets", new_pm_data)
-                        st.success(f"✅ บันทึกแผน PM เรียบร้อย! ออกใบงานเลขที่: **{pm_no}**")
+                        st.success(f"✅ บันทึกแผน PM เรียบร้อย! ออกลำดับที่: **{pm_no}**")
                         st.rerun()
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
@@ -804,14 +804,14 @@ with tab4:
             else:
                 pm_display_cols = ["ticket_no", "report_date", "report_time", "department", "equipment", "description", "status"]
                 df_pm_view = df_pm_show[pm_display_cols].copy()
-                df_pm_view.columns = ["เลขที่ใบงาน PM", "วันที่ตรวจพบ", "เวลาที่ตรวจพบ", "แผนก", "อุปกรณ์/เครื่องจักร", "รายละเอียด PM", "สถานะ"]
+                df_pm_view.columns = ["ลำดับที่", "วันที่ตรวจพบ", "เวลาที่ตรวจพบ", "แผนก", "อุปกรณ์/เครื่องจักร", "รายละเอียด PM", "สถานะ"]
                 
                 st.dataframe(apply_status_style(df_pm_view), use_container_width=True)
 
                 st.markdown("---")
                 st.markdown("#### 🔍 ตรวจสอบสื่อประกอบ (รูปถ่าย / วิดีโอ) **ก่อนทำ PM**")
                 selected_pm_ticket = st.selectbox(
-                    "เลือกเลขที่ใบงาน PM เพื่อดูรูปภาพ/วิดีโอก่อนทำ:", 
+                    "เลือกลำดับที่ PM เพื่อดูรูปภาพ/วิดีโอก่อนทำ:", 
                     df_pm_show["ticket_no"].tolist(),
                     key="sel_pm_media_b_view"
                 )
@@ -844,7 +844,7 @@ with tab5:
             all_pm_tickets_list = df_pm["ticket_no"].tolist()
             
             selected_after_ticket = st.selectbox(
-                "เลือกเลขที่ใบงาน PM เพื่อบันทึกผลหลังทำ:",
+                "เลือกลำดับที่ PM เพื่อบันทึกผลหลังทำ:",
                 options=active_pm_tickets if active_pm_tickets else all_pm_tickets_list,
                 key="pm_after_ticket_sel"
             )
@@ -852,7 +852,7 @@ with tab5:
             if selected_after_ticket:
                 target_item = df_pm[df_pm["ticket_no"] == selected_after_ticket].iloc[0]
                 
-                st.info(f"📌 **ใบงาน PM:** {target_item.get('ticket_no')} | **อุปกรณ์:** {target_item.get('equipment')} | **แผนก:** {target_item.get('department')}")
+                st.info(f"📌 **ลำดับที่:** {target_item.get('ticket_no')} | **อุปกรณ์:** {target_item.get('equipment')} | **แผนก:** {target_item.get('department')}")
                 
                 with st.form("pm_after_form"):
                     col_af1, col_af2 = st.columns(2)
@@ -924,7 +924,7 @@ with tab5:
                             
                             try:
                                 update_data_in_supabase("pm_tickets", update_after_data, target_item["id"])
-                                st.success(f"✅ บันทึกผลหลังทำ PM ใบงาน **{target_item.get('ticket_no')}** เรียบร้อยแล้ว!")
+                                st.success(f"✅ บันทึกผลหลังทำ PM ลำดับที่ **{target_item.get('ticket_no')}** เรียบร้อยแล้ว!")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
@@ -937,14 +937,14 @@ with tab5:
             st.info("ยังไม่มีข้อมูลใบงาน PM ในระบบ")
         else:
             compare_ticket_no = st.selectbox(
-                "เลือกใบงาน PM เพื่อเปรียบเทียบรูปภาพ/วิดีโอ:",
+                "เลอร์กลำดับที่ PM เพื่อเปรียบเทียบรูปภาพ/วิดีโอ:",
                 df_pm["ticket_no"].tolist(),
                 key="pm_compare_media_sel"
             )
             
             if compare_ticket_no:
                 c_item = df_pm[df_pm["ticket_no"] == compare_ticket_no].iloc[0]
-                st.markdown(f"**ใบงาน PM เลขที่:** `{c_item.get('ticket_no')}` | **อุปกรณ์:** {c_item.get('equipment')} | **สถานะ:** {c_item.get('status')}")
+                st.markdown(f"**ลำดับที่:** `{c_item.get('ticket_no')}` | **อุปกรณ์:** {c_item.get('equipment')} | **สถานะ:** {c_item.get('status')}")
                 
                 col_comp1, col_comp2 = st.columns(2)
                 with col_comp1:
@@ -962,5 +962,5 @@ with tab5:
         else:
             show_cols = ["ticket_no", "department", "equipment", "technician", "solution", "completed_date", "status"]
             df_pm_after_view = df_pm[show_cols].copy()
-            df_pm_after_view.columns = ["เลขที่ใบงาน PM", "แผนก", "อุปกรณ์", "ช่างผู้ทำ", "ผลการทำ PM", "วันที่เสร็จ", "สถานะ"]
+            df_pm_after_view.columns = ["ลำดับที่", "แผนก", "อุปกรณ์", "ช่างผู้ทำ", "ผลการทำ PM", "วันที่เสร็จ", "สถานะ"]
             st.dataframe(apply_status_style(df_pm_after_view), use_container_width=True)
