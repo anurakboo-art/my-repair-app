@@ -168,10 +168,12 @@ def style_status(val):
         return "background-color: #d4edda; color: #155724; font-weight: bold;"
     elif val == "รอดำเนินการ":
         return "background-color: #fff3cd; color: #856404; font-weight: bold;"
-    elif val == "ยกเลิก":
-        return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
     elif val == "กำลังดำเนินการ":
         return "background-color: #cce5ff; color: #004085; font-weight: bold;"
+    elif val == "รออะไหล่":
+        return "background-color: #ffeba7; color: #855700; font-weight: bold;"
+    elif val == "ยกเลิก":
+        return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
     return ""
 
 def apply_status_style(df_input):
@@ -252,7 +254,7 @@ def generate_default_received_no(df):
     return f"{prefix}{max_num + 1:03d}"
 
 # -------------------------------------------------------------
-# Main App Layout (แบบ 5 Tabs)
+# Main App Layout (5 Tabs)
 # -------------------------------------------------------------
 df = load_data()
 
@@ -263,7 +265,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "⚙️ จัดการสถานะ / อัปเดตงานซ่อม",
     "📊 รายงาน & สถิติ",
     "📅 แผนงาน PM & ปฏิทิน",
-    "📦 คลังอะไหล่ & ตั้งค่าระบบ"
+    "🔄 สถานะการแก้ไขงาน & ติดตามงาน"
 ])
 
 # =============================================================
@@ -363,7 +365,7 @@ with tab2:
     else:
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            status_filter = st.multiselect("กรองตามสถานะ", options=["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ", "ยกเลิก"])
+            status_filter = st.multiselect("กรองตามสถานะ", options=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "ยกเลิก"])
         with col_f2:
             search_kw = st.text_input("🔍 ค้นหา (เลขใบแจ้งซ่อม / เลขที่รับ / ชื่อผู้แจ้ง / อุปกรณ์)", "")
             
@@ -490,17 +492,16 @@ with tab2:
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                status_options = ["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"]
+                status_options = ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"]
                 curr_status = str(ticket["status"] or "รอดำเนินการ")
                 status_idx = status_options.index(curr_status) if curr_status in status_options else 0
                 
                 col_u1, col_u2 = st.columns(2)
                 with col_u1:
-                    new_status = st.selectbox("สถานะงาน (เลือก 'ยกเลิก' เพื่อยกเลิกงาน) *", status_options, index=status_idx)
+                    new_status = st.selectbox("สถานะงาน *", status_options, index=status_idx)
                 with col_u2:
                     technician_name = st.text_input("ชื่อผู้ซ่อม / ช่างผู้รับผิดชอบ", value=str(ticket.get("technician", "") or ""))
                 
-                # ช่องกรอก "อาการที่ตรวจพบ", "สาเหตุ", "การแก้ไข"
                 col_sec1, col_sec2 = st.columns(2)
                 with col_sec1:
                     detected_symptom_input = st.text_area(
@@ -559,7 +560,7 @@ with tab2:
                     key="edit_img_a"
                 )
                 
-                update_submitted = st.form_submit_button("💾 บันทึกการอัปเดต / ยกเลิกงาน", use_container_width=True)
+                update_submitted = st.form_submit_button("💾 บันทึกการอัปเดตงาน", use_container_width=True)
                 
                 if update_submitted:
                     if not supabase:
@@ -620,18 +621,6 @@ with tab2:
                             st.rerun()
                         except Exception as e:
                             st.error(f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            with st.expander("🚨 โซนอันตราย: ลบใบแจ้งซ่อมนี้ออกจากระบบถาวร"):
-                st.warning(f"⚠️ คำเตือน: การลบใบแจ้งซ่อมเลขที่ **{ticket['ticket_no']}** จะลบข้อมูลออกจากระบบอย่างถาวร ไม่สามารถกู้คืนได้")
-                confirm_delete = st.checkbox(f"ยืนยันต้องการลบใบแจ้งซ่อม {ticket['ticket_no']} ถาวร", key=f"del_chk_{ticket['id']}")
-                if st.button("🗑️ ยืนยันลบข้อมูลออกจากฐานข้อมูล", disabled=not confirm_delete, type="primary", use_container_width=True):
-                    try:
-                        supabase.table("tickets").delete().eq("id", ticket["id"]).execute()
-                        st.success(f"🗑️ ลบใบแจ้งซ่อม **{ticket['ticket_no']}** ออกจากระบบเรียบร้อยแล้ว")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"เกิดข้อผิดพลาดในการลบข้อมูล: {e}")
 
 # =============================================================
 # TAB 3: รายงาน & สถิติ
@@ -732,11 +721,10 @@ with tab3:
             
             st.markdown("---")
             
-            # แถวที่ 1: กราฟงานค้างสะสม + กราฟสัดส่วนสถานะงาน
             col_g1, col_g2 = st.columns(2)
             with col_g1:
                 st.markdown("##### 🕒 กราฟงานค้างสะสมแยกตามอายุงาน (ยังไม่เสร็จ)")
-                df_pending = df_stats[df_stats["status"].isin(["รอดำเนินการ", "กำลังดำเนินการ"])].copy()
+                df_pending = df_stats[df_stats["status"].isin(["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"])].copy()
                 
                 if df_pending.empty:
                     st.success("🎉 ไม่มีงานค้างสะสมในช่วงเวลาที่เลือก!")
@@ -801,292 +789,8 @@ with tab3:
                 fig_status = px.pie(status_counts, names="สถานะ", values="จำนวน", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
                 st.plotly_chart(fig_status, use_container_width=True)
 
-            # แถวที่ 2: กราฟวิเคราะห์ประเภทงาน (แจ้งซ่อม VS PM)
-            col_g5, col_g6 = st.columns(2)
-            with col_g5:
-                st.markdown("##### 🛠️ สัดส่วนประเภทงาน (แจ้งซ่อม VS PM)")
-                job_type_counts = df_stats["job_type"].value_counts().reset_index()
-                job_type_counts.columns = ["ประเภทงาน", "จำนวน"]
-                fig_job_type = px.pie(
-                    job_type_counts, 
-                    names="ประเภทงาน", 
-                    values="จำนวน", 
-                    hole=0.4, 
-                    color="ประเภทงาน",
-                    color_discrete_map={"แจ้งซ่อม": "#3498db", "PM": "#2ecc71"}
-                )
-                fig_job_type.update_traces(textinfo='percent+label+value')
-                st.plotly_chart(fig_job_type, use_container_width=True)
-
-            with col_g6:
-                st.markdown("##### 📅 สถานะงานประเภท PM แยกตามแผนก")
-                df_pm = df_stats[df_stats["job_type"] == "PM"]
-                if df_pm.empty:
-                    st.info("ℹ️ ไม่พบข้อมูลงานประเภท PM ในช่วงเวลาที่เลือก")
-                else:
-                    pm_dept_status = df_pm.groupby(["department", "status"]).size().reset_index(name="จำนวน")
-                    fig_pm_dept = px.bar(
-                        pm_dept_status, 
-                        x="department", 
-                        y="จำนวน", 
-                        color="status", 
-                        barmode="stack",
-                        color_discrete_map={
-                            "เสร็จสิ้น": "#2ecc71",
-                            "กำลังดำเนินการ": "#3498db",
-                            "รอดำเนินการ": "#f1c40f",
-                            "ยกเลิก": "#e74c3c"
-                        }
-                    )
-                    fig_pm_dept.update_layout(xaxis_title="แผนก / โซน", yaxis_title="จำนวนงาน PM")
-                    st.plotly_chart(fig_pm_dept, use_container_width=True)
-
-            # แถวที่ 3: กราฟความเร่งด่วน + กราฟแยกตามแผนก
-            col_g3, col_g4 = st.columns(2)
-            with col_g3:
-                st.markdown("##### 🚨 สัดส่วนระดับความเร่งด่วน")
-                prio_counts = df_stats["priority"].value_counts().reset_index()
-                prio_counts.columns = ["ความเร่งด่วน", "จำนวน"]
-                fig_prio = px.bar(prio_counts, x="ความเร่งด่วน", y="จำนวน", color="ความเร่งด่วน", color_discrete_sequence=px.colors.qualitative.Set2)
-                st.plotly_chart(fig_prio, use_container_width=True)
-                
-            with col_g4:
-                st.markdown("##### 🏢 จำนวนงานรวมแยกตามแผนก")
-                dept_counts = df_stats["department"].value_counts().reset_index()
-                dept_counts.columns = ["แผนก", "จำนวน"]
-                fig_dept = px.bar(
-                    dept_counts, 
-                    x="จำนวน", 
-                    y="แผนก", 
-                    orientation="h", 
-                    color="แผนก",
-                    color_discrete_sequence=px.colors.qualitative.Set3
-                )
-                fig_dept.update_layout(showlegend=False)
-                st.plotly_chart(fig_dept, use_container_width=True)
-
-            # สรุปสถิติการใช้อะไหล่และอุปกรณ์
-            st.markdown("---")
-            st.markdown("### 🧩 สรุปสถิติการใช้อะไหล่และอุปกรณ์ (Spare Parts Report)")
-
-            def parse_parts_summary(df_in):
-                items = []
-                for idx, row in df_in.iterrows():
-                    p_str = str(row.get("parts_used", "") or "").strip()
-                    q_str = str(row.get("parts_qty", "") or "").strip()
-                    
-                    if not p_str or p_str.lower() == "nan":
-                        continue
-                        
-                    p_lines = [line.strip() for line in p_str.split('\n') if line.strip()]
-                    q_lines = [line.strip() for line in q_str.split('\n') if line.strip()]
-                    
-                    for i, p_line in enumerate(p_lines):
-                        clean_part = re.sub(r'^\d+[\.\)]\s*|^[-\*]\s*', '', p_line).strip()
-                        qty_val_raw = ""
-                        if i < len(q_lines):
-                            qty_val_raw = re.sub(r'^\d+[\.\)]\s*|^[-\*]\s*', '', q_lines[i]).strip()
-                        
-                        num_val = 1.0
-                        unit_str = ""
-                        if qty_val_raw and qty_val_raw != "-":
-                            match = re.search(r'(\d+(?:\.\d+)?)', qty_val_raw)
-                            if match:
-                                try:
-                                    num_val = float(match.group(1))
-                                except ValueError:
-                                    num_val = 1.0
-                                unit_str = re.sub(r'\d+(?:\.\d+)?', '', qty_val_raw).strip()
-                            else:
-                                unit_str = qty_val_raw.strip()
-                        
-                        if clean_part:
-                            items.append({
-                                "ticket_no": row.get("ticket_no", ""),
-                                "อะไหล่": clean_part,
-                                "qty_num": num_val,
-                                "unit": unit_str,
-                                "raw_qty": qty_val_raw if qty_val_raw else "-"
-                            })
-                return pd.DataFrame(items)
-
-            df_parts_parsed = parse_parts_summary(df_stats)
-
-            if df_parts_parsed.empty:
-                st.info("ℹ️ ยังไม่มีข้อมูลการบันทึกใช้อะไหล่ในช่วงเวลาที่เลือก")
-            else:
-                def get_unit(units_series):
-                    unique_u = [u for u in units_series if u]
-                    return unique_u[0] if unique_u else ""
-
-                parts_summary = df_parts_parsed.groupby("อะไหล่").agg(
-                    total_qty=("qty_num", "sum"),
-                    unit=("unit", get_unit),
-                    times_used=("อะไหล่", "count")
-                ).reset_index()
-
-                def format_qty_display(row):
-                    q = row["total_qty"]
-                    q_str = f"{int(q)}" if q.is_integer() else f"{q:.2f}"
-                    if row["unit"]:
-                        return f"{q_str} {row['unit']}"
-                    return f"{q_str}"
-
-                parts_summary["จำนวนที่ใช้งาน"] = parts_summary["total_qty"]
-                parts_summary["จำนวนที่ใช้งาน (ระบุหน่วย)"] = parts_summary.apply(format_qty_display, axis=1)
-                parts_summary = parts_summary.sort_values(by="total_qty", ascending=False)
-                
-                parts_summary_display = parts_summary[["อะไหล่", "จำนวนที่ใช้งาน (ระบุหน่วย)", "times_used"]].copy()
-                parts_summary_display.columns = ["รายการอะไหล่ / อุปกรณ์", "จำนวนที่ใช้งาน", "จำนวนครั้งที่ซ่อม (งาน)"]
-                
-                total_parts_sum = parts_summary["total_qty"].sum()
-                total_parts_sum_str = f"{int(total_parts_sum)}" if total_parts_sum.is_integer() else f"{total_parts_sum:.2f}"
-
-                col_pmetric1, col_pmetric2 = st.columns(2)
-                col_pmetric1.metric("📦 ประเภทอะไหล่ที่ถูกใช้งาน", f"{len(parts_summary)} ชนิด")
-                col_pmetric2.metric("🔢 รวมจำนวนอะไหล่ที่เบิกใช้ทั้งหมด", f"{total_parts_sum_str} ชิ้น/หน่วย")
-                
-                col_pchart, col_ptable = st.columns([1, 1])
-                with col_pchart:
-                    st.markdown("##### 📊 10 อันดับอะไหล่ที่ใช้จำนวนมากที่สุด")
-                    top10_parts = parts_summary.head(10).sort_values(by="total_qty", ascending=True)
-                    fig_parts = px.bar(
-                        top10_parts,
-                        x="total_qty",
-                        y="อะไหล่",
-                        orientation="h",
-                        text="จำนวนที่ใช้งาน (ระบุหน่วย)",
-                        color="total_qty",
-                        color_continuous_scale="Viridis"
-                    )
-                    fig_parts.update_traces(textposition="outside")
-                    fig_parts.update_layout(showlegend=False, coloraxis_showscale=False, yaxis_title="", xaxis_title="จำนวนที่ใช้งาน")
-                    st.plotly_chart(fig_parts, use_container_width=True)
-                    
-                with col_ptable:
-                    st.markdown("##### 📋 ตารางรายละเอียดสรุปจำนวนการใช้อะไหล่")
-                    st.dataframe(parts_summary_display, use_container_width=True, hide_index=True)
-                
-            st.markdown("---")
-            st.markdown("### 📄 ตารางรายงานสรุปงานซ่อม (เรียงตามวันที่แจ้ง)")
-            
-            def count_media_status(val):
-                items = get_image_list_from_b64(val)
-                return f"มี {len(items)} ไฟล์" if items else "ไม่มี"
-                
-            df_stats["ไฟล์ประกอบก่อนซ่อม"] = df_stats["image_before"].apply(count_media_status)
-            df_stats["ไฟล์ประกอบหลังซ่อม"] = df_stats["image_after"].apply(count_media_status)
-            
-            report_cols = [
-                "ticket_no", "received_no", "reporter", "job_type", "department", "equipment", 
-                "description", "status", "report_date", "report_time", "received_date", "received_time",
-                "technician", "detected_symptom", "cause", "solution", "parts_used", "parts_qty", "completed_date", 
-                "completed_time", "ระยะเวลาซ่อมรวม", "ไฟล์ประกอบก่อนซ่อม", "ไฟล์ประกอบหลังซ่อม"
-            ]
-            
-            completed_df_display = df_stats[report_cols].copy()
-            completed_df_display.columns = [
-                "เลขที่ใบแจ้งซ่อม", "เลขที่รับ", "ผู้แจ้ง", "ประเภทงาน", "แผนก", "อุปกรณ์", 
-                "อาการเบื้องต้น", "สถานะ", "วันที่แจ้ง", "เวลาแจ้ง", "วันที่รับ", "เวลาที่รับ",
-                "ช่างผู้ซ่อม", "อาการที่ตรวจพบ", "สาเหตุ", "การแก้ไข", "อะไหล่ที่ใช้", "จำนวน", "วันที่เสร็จ", 
-                "เวลาเสร็จ", "ระยะเวลาซ่อมรวม", "สื่อก่อนซ่อม", "สื่อหลังซ่อม"
-            ]
-            
-            st.dataframe(apply_status_style(completed_df_display), use_container_width=True)
-            
-            csv_data = completed_df_display.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label="📥 ดาวน์โหลดรายงาน (CSV)",
-                data=csv_data,
-                file_name=f"repair_report_{get_thailand_now_dt().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-
-            # ตารางรายการงานล่าสุด (Work Order List & Drill-down)
-            st.markdown("---")
-            st.markdown("### 📋 ตารางรายการงานซ่อมล่าสุด (Work Order List Table)")
-            st.caption("เลือกรายการจากตัวเลือกด้านล่างเพื่อ Drill-down ดูรายละเอียดงานฉบับเต็มได้ทันที")
-
-            if not df_stats.empty:
-                df_recent = df_stats.tail(10).iloc[::-1].copy()
-
-                recent_cols = ["ticket_no", "reporter", "job_type", "equipment", "status", "technician"]
-                df_recent_display = df_recent[recent_cols].copy()
-                df_recent_display.columns = [
-                    "เลขที่ใบแจ้งซ่อม (Ticket)", 
-                    "ชื่อผู้แจ้ง", 
-                    "ประเภทงาน",
-                    "อุปกรณ์ / เครื่องจักร", 
-                    "สถานะ", 
-                    "ช่างผู้รับผิดชอบ"
-                ]
-
-                st.dataframe(apply_status_style(df_recent_display), use_container_width=True)
-
-                recent_tickets_list = df_recent["ticket_no"].tolist()
-
-                col_sel1, _ = st.columns([2, 1])
-                with col_sel1:
-                    selected_dd_ticket = st.selectbox(
-                        "🔍 เลือกใบแจ้งซ่อมเพื่อดูรายละเอียด (Drill-down):",
-                        options=recent_tickets_list,
-                        index=0,
-                        key="dd_selectbox_recent_work_orders"
-                    )
-
-                if selected_dd_ticket:
-                    t_detail = df_recent[df_recent["ticket_no"] == selected_dd_ticket].iloc[0]
-                    
-                    with st.expander(f"🔎 รายละเอียด Drill-down: ใบแจ้งซ่อม {t_detail['ticket_no']} [{t_detail['status']}]", expanded=True):
-                        col_d1, col_d2, col_d3 = st.columns(3)
-                        with col_d1:
-                            st.markdown(f"**เลขที่ใบแจ้งซ่อม:** `{t_detail.get('ticket_no', '-')}`")
-                            st.markdown(f"**ชื่อผู้แจ้ง:** {t_detail.get('reporter', '-')}")
-                            st.markdown(f"**ประเภทงาน:** {t_detail.get('job_type', '-')}")
-                            st.markdown(f"**แผนก / โซน:** {t_detail.get('department', '-')}")
-                        with col_d2:
-                            st.markdown(f"**อุปกรณ์/เครื่องจักร:** {t_detail.get('equipment', '-')}")
-                            st.markdown(f"**ระดับความเร่งด่วน:** {t_detail.get('priority', '-')}")
-                            st.markdown(f"**สถานะปัจจุบัน:** `{t_detail.get('status', '-')}`")
-                            st.markdown(f"**วันที่แจ้งซ่อม:** {t_detail.get('report_date', '-')} {t_detail.get('report_time', '')}")
-                        with col_d3:
-                            st.markdown(f"**เลขที่รับงาน:** {t_detail.get('received_no', '-')}")
-                            st.markdown(f"**ช่างผู้รับผิดชอบ:** {t_detail.get('technician', '-')}")
-                            st.markdown(f"**วันที่เสร็จสิ้น:** {t_detail.get('completed_date', '-')} {t_detail.get('completed_time', '')}")
-                            st.markdown(f"**ระยะเวลาซ่อมรวม:** {t_detail.get('ระยะเวลาซ่อมรวม', '-')}")
-
-                        st.markdown("---")
-                        st.markdown(f"**📌 อาการเสียเบื้องต้น (ที่ผู้แจ้งระบุ):** {t_detail.get('description', '-')}")
-                        st.markdown(f"**🔍 อาการที่ตรวจพบจริง (โดยช่าง):** {t_detail.get('detected_symptom', '-')}")
-                        st.markdown(f"**⚠️ สาเหตุของปัญหา:** {t_detail.get('cause', '-')}")
-                        st.markdown(f"**🛠️ การแก้ไข / วิธีดำเนินการ:** {t_detail.get('solution', '-')}")
-                        
-                        p_used = str(t_detail.get('parts_used', '') or '').strip()
-                        p_qty = str(t_detail.get('parts_qty', '') or '').strip()
-                        
-                        col_part1, col_part2 = st.columns(2)
-                        with col_part1:
-                            st.markdown("**🧩 อะไหล่ที่ใช้:**")
-                            if p_used:
-                                st.text(p_used)
-                            else:
-                                st.write("-")
-                        with col_part2:
-                            st.markdown("**🔢 จำนวนอะไหล่:**")
-                            if p_qty:
-                                st.text(p_qty)
-                            else:
-                                st.write("-")
-
-                        st.markdown("---")
-                        col_img1, col_img2 = st.columns(2)
-                        with col_img1:
-                            display_media_gallery(t_detail.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนซ่อม (Before)")
-                        with col_img2:
-                            display_media_gallery(t_detail.get("image_after", ""), title="📸/🎥 สื่อประกอบหลังซ่อม (After)")
-
 # =============================================================
-# TAB 4: แผนงาน PM & ปฏิทินการบำรุงรักษา
+# TAB 4: แผนงาน PM & ปฏิทิน
 # =============================================================
 with tab4:
     st.subheader("📅 ตารางวางแผนการบำรุงรักษาเชิงป้องกัน (PM Schedule)")
@@ -1142,7 +846,7 @@ with tab4:
         if df_pm_all.empty:
             st.info("ยังไม่มีข้อมูลแผนงาน PM ในระบบ")
         else:
-            pm_status_filter = st.multiselect("กรองสถานะ PM", ["รอดำเนินการ", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ"])
+            pm_status_filter = st.multiselect("กรองสถานะ PM", ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"])
             df_pm_show = df_pm_all[df_pm_all["status"].isin(pm_status_filter)]
             
             if df_pm_show.empty:
@@ -1155,73 +859,176 @@ with tab4:
                 st.dataframe(apply_status_style(df_pm_view), use_container_width=True)
 
 # =============================================================
-# TAB 5: คลังอะไหล่ & ตั้งค่าระบบ
+# TAB 5: สถานะการแก้ไขงาน & ติดตามงานซ่อม (ปรับปรุงตามคำขอ)
 # =============================================================
 with tab5:
-    st.subheader("📦 จัดการสต็อกอะไหล่ & ตั้งค่าระบบ (Master Settings)")
-    
-    sub_tab1, sub_tab2 = st.tabs(["🧩 รายการอะไหล่ & สต็อก", "⚙️ จัดการข้อมูลหลัก (Master Data)"])
-    
-    with sub_tab1:
-        st.markdown("#### 📊 บริหารจัดการคลังอะไหล่ซ่อมบำรุง")
-        st.caption("สรุปข้อมูลอะไหล่ทั้งหมดที่เคยถูกบันทึกใช้จริงในระบบ เพื่ออำนวยความสะดวกในการสั่งซื้อเติมสต็อก")
+    st.subheader("🔄 สถานะการแก้ไขงาน & ติดตามความก้าวหน้า (Work Edit Status)")
+    st.caption("ศูนย์กลางติดตามสถานะ เปลี่ยนสถานะด่วน และตรวจสอบประวัติการแก้ไขงานซ่อมบำรุงทุกขั้นตอน")
+
+    st_sub1, st_sub2, st_sub3 = st.tabs([
+        "📌 กระดานติดตามสถานะงาน (Quick Update)", 
+        "📝 บันทึกประวัติการแก้ไขงาน (Edit History)",
+        "📦 คลังอะไหล่ & ข้อมูลระบบ"
+    ])
+
+    # -------------------------------------------------------------
+    # Sub-tab 1: กระดานติดตามสถานะงาน + อัปเดตสถานะด่วน
+    # -------------------------------------------------------------
+    with st_sub1:
+        st.markdown("#### 🎯 สรุปสถานะความคืบหน้างานซ่อมบำรุงปัจจุบัน")
         
-        if not df.empty and "parts_used" in df.columns:
-            df_parts_summary_tab5 = parse_parts_summary(df)
-            if not df_parts_summary_tab5.empty:
-                def get_unit_tab5(units_series):
-                    unique_u = [u for u in units_series if u]
-                    return unique_u[0] if unique_u else ""
-
-                parts_agg = df_parts_summary_tab5.groupby("อะไหล่").agg(
-                    total_qty=("qty_num", "sum"),
-                    unit=("unit", get_unit_tab5),
-                    times_used=("อะไหล่", "count")
-                ).reset_index()
-
-                def format_qty_display_tab5(row):
-                    q = row["total_qty"]
-                    q_str = f"{int(q)}" if q.is_integer() else f"{q:.2f}"
-                    if row["unit"]:
-                        return f"{q_str} {row['unit']}"
-                    return f"{q_str}"
-
-                parts_agg["จำนวนรวมที่ใช้"] = parts_agg.apply(format_qty_display_tab5, axis=1)
-                parts_agg = parts_agg.sort_values(by="total_qty", ascending=False)
-                
-                show_parts_tab5 = parts_agg[["อะไหล่", "จำนวนรวมที่ใช้", "times_used"]].copy()
-                show_parts_tab5.columns = ["รายการอะไหล่ / อุปกรณ์", "จำนวนรวมที่เบิกใช้แล้ว", "จำนวนงานซ่อมที่ใช้"]
-                
-                col_st1, col_st2 = st.columns([2, 1])
-                with col_st1:
-                    st.dataframe(show_parts_tab5, use_container_width=True, hide_index=True)
-                with col_st2:
-                    st.metric("📦 ชนิดอะไหล่ทั้งหมดในระบบ", f"{len(show_parts_tab5)} รายการ")
-                    st.metric("🔁 รวมการเบิกใช้ทั้งหมด", f"{parts_agg['times_used'].sum()} ครั้ง")
-            else:
-                st.info("ยังไม่มีข้อมูลการบันทึกเบิกใช้อะไหล่ในระบบ")
-        else:
+        if df.empty:
             st.info("ยังไม่มีข้อมูลงานซ่อมในระบบ")
+        else:
+            c_pending = len(df[df["status"] == "รอดำเนินการ"])
+            c_inprog = len(df[df["status"] == "กำลังดำเนินการ"])
+            c_waitpart = len(df[df["status"] == "รออะไหล่"])
+            c_done = len(df[df["status"] == "เสร็จสิ้น"])
+            c_cancel = len(df[df["status"] == "ยกเลิก"])
 
-    with sub_tab2:
-        st.markdown("#### 🛠️ ตั้งค่าข้อมูลหลักของระบบ (Master Data Overview)")
-        col_m1, col_m2 = st.columns(2)
+            sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+            sc1.metric("⏳ รอดำเนินการ", f"{c_pending} งาน")
+            sc2.metric("🔄 กำลังดำเนินการ", f"{c_inprog} งาน")
+            sc3.metric("📦 รออะไหล่", f"{c_waitpart} งาน")
+            sc4.metric("✅ เสร็จสิ้น", f"{c_done} งาน")
+            sc5.metric("❌ ยกเลิก", f"{c_cancel} งาน")
+
+            st.markdown("---")
+            st.markdown("#### ⚡ เปลี่ยนสถานะงานด่วน (Quick Status Update)")
+            st.caption("เลือกงานซ่อมและเปลี่ยนสถานะพร้อมบันทึกหมายเหตุเพิ่มเติมได้ทันที")
+
+            active_tickets = df[df["status"].isin(["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"])]["ticket_no"].tolist()
+            all_tickets_list = df["ticket_no"].tolist()
+
+            col_qs1, col_qs2 = st.columns([2, 1])
+            with col_qs1:
+                selected_qs_ticket = st.selectbox(
+                    "เลือกใบแจ้งซ่อมเพื่ออัปเดตสถานะ:",
+                    options=active_tickets if active_tickets else all_tickets_list,
+                    key="quick_status_ticket_select"
+                )
+
+            if selected_qs_ticket:
+                q_ticket = df[df["ticket_no"] == selected_qs_ticket].iloc[0]
+
+                # คำนวณ % ความคืบหน้าตามสถานะ
+                status_progress_map = {
+                    "รอดำเนินการ": 20,
+                    "กำลังดำเนินการ": 60,
+                    "รออะไหล่": 40,
+                    "เสร็จสิ้น": 100,
+                    "ยกเลิก": 0
+                }
+                curr_st_val = str(q_ticket.get("status", "รอดำเนินการ"))
+                prog_val = status_progress_map.get(curr_st_val, 0)
+
+                st.write(f"**ความคืบหน้าปัจจุบัน [{curr_st_val}]:**")
+                st.progress(prog_val / 100.0)
+
+                with st.form("quick_status_form"):
+                    col_qf1, col_qf2, col_qf3 = st.columns(3)
+                    with col_qf1:
+                        st.markdown(f"**ผู้แจ้ง:** {q_ticket.get('reporter', '-')}")
+                        st.markdown(f"**แผนก:** {q_ticket.get('department', '-')}")
+                    with col_qf2:
+                        st.markdown(f"**อุปกรณ์:** {q_ticket.get('equipment', '-')}")
+                        st.markdown(f"**อาการ:** {q_ticket.get('description', '-')}")
+                    with col_qf3:
+                        qs_new_status = st.selectbox(
+                            "เปลี่ยนสถานะใหม่ *",
+                            ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"],
+                            index=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"].index(curr_st_val) if curr_st_val in ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"] else 0
+                        )
+
+                    col_qf4, col_qf5 = st.columns(2)
+                    with col_qf4:
+                        qs_tech = st.text_input("ช่างผู้รับผิดชอบ", value=str(q_ticket.get("technician", "") or ""))
+                    with col_qf5:
+                        qs_solution = st.text_area("การแก้ไข / หมายเหตุอัปเดตสถานะ", value=str(q_ticket.get("solution", "") or ""), height=70)
+
+                    btn_qs_save = st.form_submit_button("⚡ บันทึกการเปลี่ยนสถานะด่วน", use_container_width=True)
+
+                    if btn_qs_save:
+                        if not supabase:
+                            st.error("❌ ไม่สามารถเชื่อมต่อฐานข้อมูลได้")
+                        else:
+                            now_dt_qs = get_thailand_now_dt()
+                            qs_update = {
+                                "status": qs_new_status,
+                                "technician": qs_tech,
+                                "solution": qs_solution
+                            }
+                            if qs_new_status == "เสร็จสิ้น":
+                                qs_update["completed_date"] = str(now_dt_qs.date())
+                                qs_update["completed_time"] = now_dt_qs.time().strftime("%H:%M:%S")
+                                qs_update["completed_at"] = now_dt_qs.isoformat()
+
+                            try:
+                                supabase.table("tickets").update(qs_update).eq("id", q_ticket["id"]).execute()
+                                st.success(f"✅ เปลี่ยนสถานะใบแจ้งซ่อม {selected_qs_ticket} เป็น '{qs_new_status}' เรียบร้อย!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
+
+    # -------------------------------------------------------------
+    # Sub-tab 2: บันทึกประวัติและรายละเอียดการแก้ไขงาน
+    # -------------------------------------------------------------
+    with st_sub2:
+        st.markdown("#### 📜 ประวัติและบันทึกรายละเอียดการแก้ไขงานซ่อม")
+        st.caption("ตรวจสอบประวัติการแก้ไข สาเหตุ วิธีการซ่อม และสื่อประกอบย้อนหลัง")
+
+        if df.empty:
+            st.info("ยังไม่มีข้อมูลงานซ่อมในระบบ")
+        else:
+            col_sh1, col_sh2 = st.columns(2)
+            with col_sh1:
+                hist_status_filter = st.multiselect(
+                    "กรองสถานะงานที่ต้องการดูประวัติ:",
+                    ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"],
+                    default=["เสร็จสิ้น", "กำลังดำเนินการ", "รออะไหล่"]
+                )
+            with col_sh2:
+                hist_search = st.text_input("🔎 ค้นหาประวัติการแก้ไข (เลขใบแจ้งซ่อม/เครื่องจักร/ช่าง):", "")
+
+            df_hist = df.copy()
+            if hist_status_filter:
+                df_hist = df_hist[df_hist["status"].isin(hist_status_filter)]
+            if hist_search:
+                kw_h = hist_search.lower()
+                df_hist = df_hist[
+                    df_hist["ticket_no"].astype(str).str.lower().str.contains(kw_h) |
+                    df_hist["equipment"].astype(str).str.lower().str.contains(kw_h) |
+                    df_hist["technician"].astype(str).str.lower().str.contains(kw_h) |
+                    df_hist["solution"].astype(str).str.lower().str.contains(kw_h)
+                ]
+
+            hist_cols = ["ticket_no", "report_date", "department", "equipment", "technician", "detected_symptom", "cause", "solution", "status"]
+            df_hist_show = df_hist[hist_cols].copy()
+            df_hist_show.columns = ["เลขที่ใบงาน", "วันที่แจ้ง", "แผนก", "อุปกรณ์", "ช่างผู้ซ่อม", "อาการที่ตรวจพบ", "สาเหตุปัญหา", "วิธีแก้ไข/การดำเนินการ", "สถานะ"]
+
+            st.dataframe(apply_status_style(df_hist_show), use_container_width=True)
+
+    # -------------------------------------------------------------
+    # Sub-tab 3: สรุปคลังอะไหล่ & ตั้งค่าระบบ Master Data
+    # -------------------------------------------------------------
+    with st_sub3:
+        st.markdown("#### 📦 สรุปการเบิกใช้อะไหล่ & ข้อมูลระบบ (Master Data)")
         
-        with col_m1:
-            st.markdown("**🏢 รายชื่อแผนก / โซน ที่มีในระบบ:**")
+        col_m5_1, col_m5_2 = st.columns(2)
+        with col_m5_1:
+            st.markdown("**🏢 รายชื่อแผนก / โซน ที่ลงทะเบียนในระบบ:**")
             all_depts_current = list(dict.fromkeys(DEFAULT_DEPTS + [d for d in df["department"].dropna().unique().tolist() if d]))
             for d_idx, dept in enumerate(all_depts_current, 1):
                 st.markdown(f"{d_idx}. {dept}")
-            st.caption("💡 สามารถเพิ่มแผนกใหม่ได้ง่ายๆ ผ่านฟอร์มบันทึกแจ้งซ่อมใน Tab 1 และ Tab 2")
-            
-        with col_m2:
-            st.markdown("**👨‍🔧 รายชื่อช่างซ่อมในระบบ (จากประวัติงาน):**")
+
+        with col_m5_2:
+            st.markdown("**👨‍🔧 ช่างซ่อมบำรุงในระบบ:**")
             if not df.empty and "technician" in df.columns:
                 techs = [t.strip() for t in df["technician"].dropna().unique().tolist() if str(t).strip() != ""]
                 if techs:
                     for t_idx, t in enumerate(techs, 1):
                         st.markdown(f"{t_idx}. {t}")
                 else:
-                    st.write("ยังไม่มีประวัติการบันทึกชื่อช่างซ่อม")
+                    st.write("ยังไม่มีข้อมูลรายชื่อช่าง")
             else:
-                st.write("ยังไม่มีประวัติการบันทึกชื่อช่างซ่อม")
+                st.write("ยังไม่มีข้อมูลรายชื่อช่าง")
