@@ -5,7 +5,6 @@ from PIL import Image
 import io
 import base64
 import json
-import re
 import plotly.express as px
 from supabase import create_client
 
@@ -193,36 +192,70 @@ COLUMN_NAMES = [
     "completed_date", "completed_time", "completed_at", "image_after"
 ]
 
-def load_data():
+# -------------------------------------------------------------
+# Database Loader Functions (แยกข้อมูล Tab 1-2 และ Tab 4-5)
+# -------------------------------------------------------------
+def load_data_by_table(table_name="tickets", job_type_filter=None):
     if not supabase:
-        st.warning("⚠️ กรุณาตั้งค่า SUPABASE_URL และ SUPABASE_KEY ใน Secrets (.streamlit/secrets.toml)")
         return pd.DataFrame(columns=COLUMN_NAMES)
     try:
-        res = supabase.table("tickets").select("*").execute()
+        # ลองดึงจากตารางเฉพาะก่อน
+        res = supabase.table(table_name).select("*").execute()
         df = pd.DataFrame(res.data)
         if df.empty:
             return pd.DataFrame(columns=COLUMN_NAMES)
         for c in COLUMN_NAMES:
             if c not in df.columns:
                 df[c] = ""
+        if job_type_filter:
+            df = df[df["job_type"] == job_type_filter]
         
         df["sort_dt"] = pd.to_datetime(df["report_date"].astype(str) + " " + df["report_time"].astype(str).fillna("00:00:00"), errors='coerce')
         df = df.sort_values(by=["sort_dt", "created_at"], ascending=[True, True]).drop(columns=["sort_dt"])
-        
         return df
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูล: {e}")
-        return pd.DataFrame(columns=COLUMN_NAMES)
+    except Exception:
+        # หากยังไม่มีตารางแยก ให้ Fallback กลับมาดึงจากตาราง 'tickets' หลักตาม job_type
+        try:
+            res = supabase.table("tickets").select("*").execute()
+            df = pd.DataFrame(res.data)
+            if df.empty:
+                return pd.DataFrame(columns=COLUMN_NAMES)
+            for c in COLUMN_NAMES:
+                if c not in df.columns:
+                    df[c] = ""
+            if job_type_filter:
+                df = df[df["job_type"] == job_type_filter]
+            
+            df["sort_dt"] = pd.to_datetime(df["report_date"].astype(str) + " " + df["report_time"].astype(str).fillna("00:00:00"), errors='coerce')
+            df = df.sort_values(by=["sort_dt", "created_at"], ascending=[True, True]).drop(columns=["sort_dt"])
+            return df
+        except Exception as e:
+            st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูล: {e}")
+            return pd.DataFrame(columns=COLUMN_NAMES)
 
-def generate_default_ticket_no(df):
+def save_data_to_supabase(primary_table, data):
+    try:
+        return supabase.table(primary_table).insert(data).execute()
+    except Exception:
+        # Fallback to tickets table
+        return supabase.table("tickets").insert(data).execute()
+
+def update_data_in_supabase(primary_table, data, record_id):
+    try:
+        return supabase.table(primary_table).update(data).eq("id", record_id).execute()
+    except Exception:
+        # Fallback to tickets table
+        return supabase.table("tickets").update(data).eq("id", record_id).execute()
+
+def generate_ticket_no(df, prefix="REP-"):
     now = get_thailand_now_dt()
-    prefix = f"REP-{now.strftime('%Y%m%d')}-"
+    p_str = f"{prefix}{now.strftime('%Y%m%d')}-"
     if df.empty or "ticket_no" not in df.columns:
-        return f"{prefix}001"
+        return f"{p_str}001"
     
-    today_tickets = df[df["ticket_no"].astype(str).str.startswith(prefix)]
+    today_tickets = df[df["ticket_no"].astype(str).str.startswith(p_str)]
     if today_tickets.empty:
-        return f"{prefix}001"
+        return f"{p_str}001"
     
     max_num = 0
     for t in today_tickets["ticket_no"].astype(str):
@@ -232,7 +265,7 @@ def generate_default_ticket_no(df):
                 max_num = num
         except Exception:
             pass
-    return f"{prefix}{max_num + 1:03d}"
+    return f"{p_str}{max_num + 1:03d}"
 
 def generate_default_received_no(df):
     now = get_thailand_now_dt()
@@ -255,39 +288,41 @@ def generate_default_received_no(df):
     return f"{prefix}{max_num + 1:03d}"
 
 # -------------------------------------------------------------
+# โหลดข้อมูลแยกส่วน
+# -------------------------------------------------------------
+df_repair = load_data_by_table("repair_tickets", job_type_filter="แจ้งซ่อม")
+df_pm = load_data_by_table("pm_tickets", job_type_filter="PM")
+
+# -------------------------------------------------------------
 # Main App Layout (5 Tabs)
 # -------------------------------------------------------------
-df = load_data()
-
 st.title("🛠️ ระบบบันทึกงานแจ้งซ่อมบำรุง และ PM")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📝 บันทึกงานแจ้งซ่อม / PM",
-    "⚙️ จัดการสถานะ / อัปเดตงานซ่อม",
-    "📊 รายงาน & สถิติ",
-    "📅 แผนงาน PM & บันทึกก่อนทำ (Before)",
-    "✅ บันทึกผล PM & ตรวจสอบหลังทำ (After)"
+    "📝 บันทึกงานแจ้งซ่อม (Repair)",
+    "⚙️ จัดการงานแจ้งซ่อม (Repair)",
+    "📊 รายงาน & สถิติรวม",
+    "📅 แผนงาน PM & บันทึกก่อนทำ (PM)",
+    "✅ บันทึกผล PM & ตรวจสอบหลังทำ (PM)"
 ])
 
 # =============================================================
-# TAB 1: บันทึกงานแจ้งซ่อม / PM
+# TAB 1: บันทึกงานแจ้งซ่อม (Repair Only)
 # =============================================================
 with tab1:
-    st.subheader("📋 ฟอร์มแจ้งซ่อม / แจ้งทำ PM")
+    st.subheader("📋 ฟอร์มบันทึกงานแจ้งซ่อมทั่วไป")
     
-    default_ticket_no = generate_default_ticket_no(df)
-    existing_depts = df["department"].dropna().unique().tolist() if not df.empty and "department" in df.columns else []
+    default_ticket_no = generate_ticket_no(df_repair, prefix="REP-")
+    existing_depts = df_repair["department"].dropna().unique().tolist() if not df_repair.empty else []
     all_depts = list(dict.fromkeys(DEFAULT_DEPTS + [d for d in existing_depts if d]))
     dept_options = all_depts + ["➕ พิมพ์ระบุแผนกใหม่..."]
     
     with st.form("repair_form", clear_on_submit=True):
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
-            ticket_no = st.text_input("เลขที่ใบแจ้งซ่อม *", value=default_ticket_no, placeholder="เช่น REP-20260815-001")
+            ticket_no = st.text_input("เลขที่ใบแจ้งซ่อม *", value=default_ticket_no, placeholder="เช่น REP-20260819-001")
         with col2:
             reporter = st.text_input("ชื่อผู้แจ้ง *")
-        with col3:
-            job_type = st.selectbox("ประเภทงาน *", ["แจ้งซ่อม", "PM"])
             
         col4, col5 = st.columns(2)
         with col4:
@@ -312,11 +347,11 @@ with tab1:
         priority = st.select_slider("ระดับความเร่งด่วน", options=["ปกติ", "ด่วน", "ด่วนที่สุด"], value="ปกติ")
         
         uploaded_media_b = st.file_uploader(
-            "📸/🎥 อัปโหลดรูปถ่ายหรือวิดีโอก่อนซ่อม (เลือกได้หลายไฟล์: .jpg, .png, .mp4, .mov)", 
+            "📸/🎥 อัปโหลดรูปถ่ายหรือวิดีโอก่อนซ่อม (เลือกได้หลายไฟล์)", 
             type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
-            accept_multiple_files=True
+            accept_multiple_files=True,
+            key="repair_media_b"
         )
-        st.caption("💡 แนะนำให้ใช้วิดีโอสั้น (ไม่เกิน 15-20 MB) เพื่อความรวดเร็วในการประมวลผล")
         
         submitted = st.form_submit_button("💾 บันทึกใบแจ้งซ่อม", use_container_width=True)
         
@@ -326,51 +361,47 @@ with tab1:
             elif not supabase:
                 st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
             else:
-                check_dup = supabase.table("tickets").select("ticket_no").eq("ticket_no", ticket_no.strip()).execute()
-                if check_dup.data:
-                    st.error(f"❌ เลขที่ใบแจ้งซ่อม '{ticket_no.strip()}' มีในระบบแล้ว กรุณาใช้เลขอื่น")
-                else:
-                    media_b64 = process_media_files(uploaded_media_b) if uploaded_media_b else ""
-                    created_at_str = datetime.combine(report_date, report_time).replace(tzinfo=THAILAND_TZ).isoformat()
-                    
-                    new_data = {
-                        "ticket_no": ticket_no.strip(),
-                        "reporter": reporter,
-                        "job_type": job_type,
-                        "department": department.strip(),
-                        "equipment": equipment,
-                        "description": description,
-                        "priority": priority,
-                        "status": "รอดำเนินการ",
-                        "report_date": str(report_date),
-                        "report_time": report_time.strftime("%H:%M:%S"),
-                        "created_at": created_at_str,
-                        "image_before": media_b64
-                    }
-                    
-                    try:
-                        supabase.table("tickets").insert(new_data).execute()
-                        st.success(f"✅ บันทึกใบแจ้งซ่อมเลขที่ **{ticket_no}** เรียบร้อยแล้ว!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"เกิดข้อผิดพลาดในการบันทึกข้อมูล: {e}")
+                media_b64 = process_media_files(uploaded_media_b) if uploaded_media_b else ""
+                created_at_str = datetime.combine(report_date, report_time).replace(tzinfo=THAILAND_TZ).isoformat()
+                
+                new_data = {
+                    "ticket_no": ticket_no.strip(),
+                    "reporter": reporter,
+                    "job_type": "แจ้งซ่อม",
+                    "department": department.strip(),
+                    "equipment": equipment,
+                    "description": description,
+                    "priority": priority,
+                    "status": "รอดำเนินการ",
+                    "report_date": str(report_date),
+                    "report_time": report_time.strftime("%H:%M:%S"),
+                    "created_at": created_at_str,
+                    "image_before": media_b64
+                }
+                
+                try:
+                    save_data_to_supabase("repair_tickets", new_data)
+                    st.success(f"✅ บันทึกใบแจ้งซ่อมเลขที่ **{ticket_no}** เรียบร้อยแล้ว!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"เกิดข้อผิดพลาดในการบันทึกข้อมูล: {e}")
 
 # =============================================================
-# TAB 2: จัดการสถานะ / อัปเดตงานซ่อม
+# TAB 2: จัดการงานแจ้งซ่อม (Repair Only)
 # =============================================================
 with tab2:
-    st.subheader("⚙️ อัปเดตสถานะและบันทึกการซ่อม")
+    st.subheader("⚙️ จัดการสถานะและอัปเดตงานแจ้งซ่อม")
     
-    if df.empty:
+    if df_repair.empty:
         st.info("ยังไม่มีข้อมูลใบแจ้งซ่อมในระบบ")
     else:
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             status_filter = st.multiselect("กรองตามสถานะ", options=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "ยกเลิก"])
         with col_f2:
-            search_kw = st.text_input("🔍 ค้นหา (เลขใบแจ้งซ่อม / เลขที่รับ / ชื่อผู้แจ้ง / อุปกรณ์)", "")
+            search_kw = st.text_input("🔍 ค้นหา (เลขใบแจ้งซ่อม / เลขที่รับ / ชื่อผู้แจ้ง / อุปกรณ์)", "", key="repair_search")
             
-        df_filtered = df.copy()
+        df_filtered = df_repair.copy()
         if status_filter:
             df_filtered = df_filtered[df_filtered["status"].isin(status_filter)]
         if search_kw:
@@ -383,10 +414,10 @@ with tab2:
                 df_filtered["description"].astype(str).str.lower().str.contains(kw)
             ]
             
-        st.markdown(f"**รายการใบแจ้งซ่อม ({len(df_filtered)} รายการ) - เรียงตามวันที่ (เก่า ➔ ใหม่):**")
+        st.markdown(f"**รายการใบแจ้งซ่อม ({len(df_filtered)} รายการ):**")
         
         display_cols = [
-            "ticket_no", "received_no", "reporter", "job_type", "department", "equipment", 
+            "ticket_no", "received_no", "reporter", "department", "equipment", 
             "description", "priority", "status", "report_date", "report_time", 
             "received_date", "received_time", "technician", "detected_symptom", "cause", "solution", 
             "completed_date", "completed_time"
@@ -394,7 +425,7 @@ with tab2:
         
         df_show = df_filtered[display_cols].copy()
         df_show.columns = [
-            "เลขที่ใบแจ้งซ่อม", "เลขที่รับ", "ผู้แจ้ง", "ประเภทงาน", "แผนก", "อุปกรณ์", 
+            "เลขที่ใบแจ้งซ่อม", "เลขที่รับ", "ผู้แจ้ง", "แผนก", "อุปกรณ์", 
             "อาการเบื้องต้น", "ความเร่งด่วน", "สถานะ", "วันที่แจ้ง", "เวลาแจ้ง", 
             "วันที่รับ", "เวลาที่รับ", "ผู้ซ่อม", "อาการที่ตรวจพบ", "สาเหตุ", "การแก้ไข", "วันที่เสร็จ", "เวลาเสร็จ"
         ]
@@ -408,31 +439,23 @@ with tab2:
         if not ticket_list:
             st.warning("ไม่มีรายการตรงตามเงื่อนไขที่เลือก")
         else:
-            selected_ticket_no = st.selectbox("เลือกเลขที่ใบแจ้งซ่อมเพื่อจัดการ:", ticket_list)
-            ticket = df[df["ticket_no"] == selected_ticket_no].iloc[0]
+            selected_ticket_no = st.selectbox("เลือกเลขที่ใบแจ้งซ่อมเพื่อจัดการ:", ticket_list, key="sel_rep_ticket")
+            ticket = df_repair[df_repair["ticket_no"] == selected_ticket_no].iloc[0]
             
-            with st.form("update_form"):
+            with st.form("update_repair_form"):
                 st.markdown("#### 1️⃣ ข้อมูลการแจ้งซ่อม (ฝั่งผู้แจ้ง)")
-                col_e0, col_e1, col_e2, col_e3, col_e4 = st.columns(5)
+                col_e0, col_e1, col_e3, col_e4 = st.columns(4)
                 with col_e0:
                     ticket_no_edit = st.text_input("เลขที่ใบแจ้งซ่อม", value=str(ticket["ticket_no"] or ""))
                 with col_e1:
                     reporter_edit = st.text_input("ผู้แจ้งซ่อม", value=str(ticket["reporter"] or ""))
-                
-                curr_job_type = str(ticket["job_type"] or "แจ้งซ่อม")
-                job_type_list = ["แจ้งซ่อม", "PM"]
-                if curr_job_type not in job_type_list:
-                    job_type_list.append(curr_job_type)
-                    
-                with col_e2:
-                    job_type_edit = st.selectbox("ประเภทงาน", job_type_list, index=job_type_list.index(curr_job_type))
                 
                 curr_ticket_dept = str(ticket["department"] or "")
                 edit_dept_options = all_depts + ["➕ พิมพ์ระบุแผนกใหม่..."]
                 curr_dept_idx = edit_dept_options.index(curr_ticket_dept) if curr_ticket_dept in edit_dept_options else len(edit_dept_options) - 1
                 
                 with col_e3:
-                    dept_choice_edit = st.selectbox("แผนก / โซน", edit_dept_options, index=curr_dept_idx)
+                    dept_choice_edit = st.selectbox("แผนก / โซน", edit_dept_options, index=curr_dept_idx, key="edit_rep_dept")
                     if dept_choice_edit == "➕ พิมพ์ระบุแผนกใหม่...":
                         department_edit = st.text_input("พิมพ์ชื่อแผนก / โซน ใหม่", value=curr_ticket_dept)
                     else:
@@ -452,16 +475,16 @@ with tab2:
                 with col_e6:
                     description_edit = st.text_area("อาการเบื้องต้น / รายละเอียด", value=str(ticket["description"] or ""), height=70)
                 
-                st.markdown("🕒 **วันและเวลาที่แจ้ง (แก้ไขได้)**")
+                st.markdown("🕒 **วันและเวลาที่แจ้ง**")
                 col_rd, col_rt = st.columns(2)
                 
                 init_rep_date = parse_date(ticket["report_date"], now_dt.date())
                 init_rep_time = parse_time(ticket["report_time"], now_dt.time().replace(microsecond=0))
                 
                 with col_rd:
-                    report_date_edit = st.date_input("📅 วันที่แจ้ง", value=init_rep_date)
+                    report_date_edit = st.date_input("📅 วันที่แจ้ง", value=init_rep_date, key="edit_rep_date")
                 with col_rt:
-                    report_time_edit = st.time_input("⏰ เวลาที่แจ้ง", value=init_rep_time)
+                    report_time_edit = st.time_input("⏰ เวลาที่แจ้ง", value=init_rep_time, key="edit_rep_time")
                 
                 display_media_gallery(ticket.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนซ่อมปัจจุบัน")
                 
@@ -469,7 +492,7 @@ with tab2:
                     "📸/🎥 เปลี่ยน/อัปโหลดเพิ่ม รูปหรือวิดีโอก่อนซ่อม",
                     type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
                     accept_multiple_files=True,
-                    key="edit_img_b"
+                    key="edit_rep_img_b"
                 )
                 
                 st.markdown("---")
@@ -477,7 +500,7 @@ with tab2:
                 
                 curr_rcv_no = str(ticket.get("received_no", "") or "").strip()
                 if not curr_rcv_no:
-                    curr_rcv_no = generate_default_received_no(df)
+                    curr_rcv_no = generate_default_received_no(df_repair)
                     
                 col_rcv1, col_rcv2, col_rcv3 = st.columns(3)
                 with col_rcv1:
@@ -487,11 +510,9 @@ with tab2:
                 init_rcv_time = parse_time(ticket.get("received_time"), now_dt.time().replace(microsecond=0))
                 
                 with col_rcv2:
-                    received_date_input = st.date_input("📅 วันที่รับงาน", value=init_rcv_date)
+                    received_date_input = st.date_input("📅 วันที่รับงาน", value=init_rcv_date, key="rcv_rep_date")
                 with col_rcv3:
-                    received_time_input = st.time_input("⏰ เวลาที่รับงาน", value=init_rcv_time)
-                
-                st.markdown("<br>", unsafe_allow_html=True)
+                    received_time_input = st.time_input("⏰ เวลาที่รับงาน", value=init_rcv_time, key="rcv_rep_time")
                 
                 status_options = ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"]
                 curr_status = str(ticket["status"] or "รอดำเนินการ")
@@ -499,47 +520,22 @@ with tab2:
                 
                 col_u1, col_u2 = st.columns(2)
                 with col_u1:
-                    new_status = st.selectbox("สถานะงาน *", status_options, index=status_idx)
+                    new_status = st.selectbox("สถานะงาน *", status_options, index=status_idx, key="rep_status_edit")
                 with col_u2:
                     technician_name = st.text_input("ชื่อผู้ซ่อม / ช่างผู้รับผิดชอบ", value=str(ticket.get("technician", "") or ""))
                 
                 col_sec1, col_sec2 = st.columns(2)
                 with col_sec1:
-                    detected_symptom_input = st.text_area(
-                        "🔍 อาการที่ตรวจพบ (Symptom Found)", 
-                        value=str(ticket.get("detected_symptom", "") or ""), 
-                        height=100,
-                        placeholder="ระบุรายละเอียดอาการเสียจริง หรือจุดที่ช่างตรวจพบเพิ่มเติม..."
-                    )
-                    cause_input = st.text_area(
-                        "⚠️ สาเหตุของปัญหา / เหตุผลที่ยกเลิก", 
-                        value=str(ticket.get("cause", "") or ""), 
-                        height=100,
-                        placeholder="ระบุต้นเหตุของความเสียหาย..."
-                    )
+                    detected_symptom_input = st.text_area("🔍 อาการที่ตรวจพบ (Symptom Found)", value=str(ticket.get("detected_symptom", "") or ""), height=100)
+                    cause_input = st.text_area("⚠️ สาเหตุของปัญหา / เหตุผลที่ยกเลิก", value=str(ticket.get("cause", "") or ""), height=100)
                 with col_sec2:
-                    solution_input = st.text_area(
-                        "🛠️ การแก้ไข / วิธีดำเนินการ (Action Taken)", 
-                        value=str(ticket.get("solution", "") or ""), 
-                        height=230,
-                        placeholder="ระบุขั้นตอนและวิธีการปรับปรุงแก้ไข เครื่องจักร/อุปกรณ์..."
-                    )
+                    solution_input = st.text_area("🛠️ การแก้ไข / วิธีดำเนินการ", value=str(ticket.get("solution", "") or ""), height=210)
                 
                 col_p1, col_p2 = st.columns(2)
                 with col_p1:
-                    parts_used = st.text_area(
-                        "🧩 อะไหล่ที่ใช้ (ระบุเป็นข้อๆ ได้)", 
-                        value=str(ticket.get("parts_used", "") or ""), 
-                        height=100,
-                        placeholder="1. อะไหล่ A\n2. อะไหล่ B"
-                    )
+                    parts_used = st.text_area("🧩 อะไหล่ที่ใช้", value=str(ticket.get("parts_used", "") or ""), height=100)
                 with col_p2:
-                    parts_qty = st.text_area(
-                        "🔢 จำนวนอะไหล่", 
-                        value=str(ticket.get("parts_qty", "") or ""), 
-                        height=100,
-                        placeholder="1. 2 ตัว\n2. 1 ชิ้น"
-                    )
+                    parts_qty = st.text_area("🔢 จำนวนอะไหล่", value=str(ticket.get("parts_qty", "") or ""), height=100)
                     
                 st.markdown("🕒 **วันและเวลาซ่อมเสร็จ**")
                 col_cd, col_ct = st.columns(2)
@@ -548,9 +544,9 @@ with tab2:
                 init_comp_time = parse_time(ticket.get("completed_time"), now_dt.time().replace(microsecond=0))
                 
                 with col_cd:
-                    completed_date = st.date_input("📅 วันที่ซ่อมเสร็จ", value=init_comp_date)
+                    completed_date = st.date_input("📅 วันที่ซ่อมเสร็จ", value=init_comp_date, key="rep_comp_date")
                 with col_ct:
-                    completed_time = st.time_input("⏰ เวลาที่ซ่อมเสร็จ", value=init_comp_time)
+                    completed_time = st.time_input("⏰ เวลาที่ซ่อมเสร็จ", value=init_comp_time, key="rep_comp_time")
                 
                 display_media_gallery(ticket.get("image_after", ""), title="📸/🎥 สื่อประกอบหลังซ่อมปัจจุบัน")
                 
@@ -558,24 +554,17 @@ with tab2:
                     "📸/🎥 อัปโหลด/เปลี่ยน รูปหรือวิดีโอหลังซ่อมเสร็จ",
                     type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
                     accept_multiple_files=True,
-                    key="edit_img_a"
+                    key="edit_rep_img_a"
                 )
                 
-                update_submitted = st.form_submit_button("💾 บันทึกการอัปเดตงาน", use_container_width=True)
+                update_submitted = st.form_submit_button("💾 บันทึกการอัปเดตงานซ่อม", use_container_width=True)
                 
                 if update_submitted:
                     if not supabase:
                         st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
                     else:
-                        if uploaded_media_b_new:
-                            img_before_b64 = process_media_files(uploaded_media_b_new)
-                        else:
-                            img_before_b64 = str(ticket.get("image_before", "") or "")
-                            
-                        if uploaded_media_a_new:
-                            img_after_b64 = process_media_files(uploaded_media_a_new)
-                        else:
-                            img_after_b64 = str(ticket.get("image_after", "") or "")
+                        img_before_b64 = process_media_files(uploaded_media_b_new) if uploaded_media_b_new else str(ticket.get("image_before", "") or "")
+                        img_after_b64 = process_media_files(uploaded_media_a_new) if uploaded_media_a_new else str(ticket.get("image_after", "") or "")
                             
                         completed_at_str = None
                         comp_date_str = None
@@ -591,7 +580,7 @@ with tab2:
                         update_data = {
                             "ticket_no": ticket_no_edit.strip(),
                             "reporter": reporter_edit,
-                            "job_type": job_type_edit,
+                            "job_type": "แจ้งซ่อม",
                             "department": department_edit.strip(),
                             "equipment": equipment_edit,
                             "description": description_edit,
@@ -617,60 +606,55 @@ with tab2:
                         }
                         
                         try:
-                            supabase.table("tickets").update(update_data).eq("id", ticket["id"]).execute()
-                            st.success(f"✅ อัปเดตข้อมูลใบแจ้งซ่อม **{ticket_no_edit}** เรียบร้อยแล้ว (สถานะ: {new_status})!")
+                            update_data_in_supabase("repair_tickets", update_data, ticket["id"])
+                            st.success(f"✅ อัปเดตข้อมูลใบแจ้งซ่อม **{ticket_no_edit}** เรียบร้อยแล้ว!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
 
 # =============================================================
-# TAB 3: รายงาน & สถิติ
+# TAB 3: รายงาน & สถิติรวม
 # =============================================================
 with tab3:
-    st.subheader("📊 สรุปรายงานและสถิติงานซ่อมบำรุง")
+    st.subheader("📊 สรุปรายงานและสถิติภาพรวม")
     
-    if df.empty:
-        st.info("ยังไม่มีข้อมูลสำหรับสรุปรายงาน")
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        data_scope = st.selectbox("เลือกชุดข้อมูลที่ต้องการสรุป", ["งานแจ้งซ่อม (Tab 1-2)", "งาน PM (Tab 4-5)", "รวมทั้งหมด (แจ้งซ่อม + PM)"])
+    
+    if data_scope == "งานแจ้งซ่อม (Tab 1-2)":
+        df_stats = df_repair.copy()
+    elif data_scope == "งาน PM (Tab 4-5)":
+        df_stats = df_pm.copy()
     else:
-        df_stats = df.copy()
+        df_stats = pd.concat([df_repair, df_pm], ignore_index=True)
+        
+    if df_stats.empty:
+        st.info("ยังไม่มีข้อมูลสำหรับสรุปรายงานในหมวดนี้")
+    else:
         now_date = get_thailand_now_dt().date()
         
-        st.markdown("##### 📅 เลือกช่วงเวลาเพื่อดูรายงาน")
-        col_t1, col_t2 = st.columns(2)
-        with col_t1:
-            period_option = st.selectbox(
-                "ช่วงเวลาการดูข้อมูล",
-                [
-                    "ทั้งหมด", 
-                    "7 วันล่าสุด (รายสัปดาห์)", 
-                    "30 วันล่าสุด (รายเดือน)", 
-                    "ปีปัจจุบัน (รายปี)", 
-                    "กำหนดช่วงวันที่เอง (Custom)"
-                ]
-            )
+        with col_s2:
+            period_option = st.selectbox("ช่วงเวลาการดูข้อมูล", ["ทั้งหมด", "7 วันล่าสุด", "30 วันล่าสุด", "ปีปัจจุบัน", "กำหนดช่วงวันที่เอง"])
             
         df_stats["parsed_rep_date"] = pd.to_datetime(df_stats["report_date"], errors="coerce").dt.date
         
-        if period_option == "7 วันล่าสุด (รายสัปดาห์)":
+        if period_option == "7 วันล่าสุด":
             start_date = now_date - timedelta(days=7)
             df_stats = df_stats[(df_stats["parsed_rep_date"] >= start_date) & (df_stats["parsed_rep_date"] <= now_date)]
-        elif period_option == "30 วันล่าสุด (รายเดือน)":
+        elif period_option == "30 วันล่าสุด":
             start_date = now_date - timedelta(days=30)
             df_stats = df_stats[(df_stats["parsed_rep_date"] >= start_date) & (df_stats["parsed_rep_date"] <= now_date)]
-        elif period_option == "ปีปัจจุบัน (รายปี)":
+        elif period_option == "ปีปัจจุบัน":
             start_date = datetime(now_date.year, 1, 1).date()
             df_stats = df_stats[(df_stats["parsed_rep_date"] >= start_date) & (df_stats["parsed_rep_date"] <= now_date)]
-        elif period_option == "กำหนดช่วงวันที่เอง (Custom)":
-            with col_t2:
-                custom_range = st.date_input(
-                    "ระบุวันที่ (เริ่มต้น - สิ้นสุด)", 
-                    value=[now_date - timedelta(days=30), now_date]
-                )
-                if isinstance(custom_range, (list, tuple)) and len(custom_range) == 2:
-                    df_stats = df_stats[(df_stats["parsed_rep_date"] >= custom_range[0]) & (df_stats["parsed_rep_date"] <= custom_range[1])]
+        elif period_option == "กำหนดช่วงวันที่เอง":
+            custom_range = st.date_input("ระบุวันที่ (เริ่มต้น - สิ้นสุด)", value=[now_date - timedelta(days=30), now_date], key="stats_custom_range")
+            if isinstance(custom_range, (list, tuple)) and len(custom_range) == 2:
+                df_stats = df_stats[(df_stats["parsed_rep_date"] >= custom_range[0]) & (df_stats["parsed_rep_date"] <= custom_range[1])]
         
         if df_stats.empty:
-            st.warning("⚠️ ไม่พบข้อมูลงานซ่อมซ่อมบำรุงตามช่วงเวลาที่เลือก")
+            st.warning("⚠️ ไม่พบข้อมูลตามช่วงเวลาที่เลือก")
         else:
             def calc_repair_time(row):
                 if row["status"] == "เสร็จสิ้น" and pd.notna(row.get("completed_date")):
@@ -678,9 +662,6 @@ with tab3:
                         s_date = row['received_date'] if pd.notna(row.get('received_date')) and str(row.get('received_date')).strip() != "" else row['report_date']
                         s_time = row['received_time'] if pd.notna(row.get('received_time')) and str(row.get('received_time')).strip() != "" else row['report_time']
                         
-                        if pd.isna(s_date) or str(s_date).strip() == "":
-                            return None
-                            
                         s_time_str = str(s_time).strip() if pd.notna(s_time) and str(s_time).strip() != "" else "00:00:00"
                         c_time_str = str(row['completed_time']).strip() if pd.notna(row['completed_time']) and str(row['completed_time']).strip() != "" else "00:00:00"
                         
@@ -693,23 +674,16 @@ with tab3:
                 return None
                 
             df_stats["repair_duration"] = df_stats.apply(calc_repair_time, axis=1)
-            df_stats["ระยะเวลาซ่อมรวม"] = df_stats["repair_duration"].apply(format_timedelta)
             
             total_jobs = len(df_stats)
             done_jobs = len(df_stats[df_stats["status"] == "เสร็จสิ้น"])
             pending_jobs = len(df_stats[df_stats["status"] == "รอดำเนินการ"])
             in_prog_jobs = len(df_stats[df_stats["status"] == "กำลังดำเนินการ"])
-            cancel_jobs = len(df_stats[df_stats["status"] == "ยกเลิก"])
             outstanding_jobs = pending_jobs + in_prog_jobs
             
             valid_durations = df_stats["repair_duration"].dropna()
-            avg_duration_str = "-"
-            total_duration_str = "-"
-            if not valid_durations.empty:
-                avg_td = valid_durations.mean()
-                sum_td = valid_durations.sum()
-                avg_duration_str = format_timedelta(avg_td)
-                total_duration_str = format_timedelta(sum_td)
+            avg_duration_str = format_timedelta(valid_durations.mean()) if not valid_durations.empty else "-"
+            total_duration_str = format_timedelta(valid_durations.sum()) if not valid_durations.empty else "-"
                 
             m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
             m1.metric("📋 งานทั้งหมด", f"{total_jobs} งาน")
@@ -717,124 +691,80 @@ with tab3:
             m3.metric("⚠️ งานค้างสะสม", f"{outstanding_jobs} งาน")
             m4.metric("⏳ รอดำเนินการ", f"{pending_jobs} งาน")
             m5.metric("🔄 กำลังซ่อม", f"{in_prog_jobs} งาน")
-            m6.metric("⏱️ เวลาซ่อมรวมทั้งหมด", total_duration_str)
-            m7.metric("⏱️ เวลาซ่อมเฉลี่ย", avg_duration_str)
+            m6.metric("⏱️ เวลาซ่อมรวม", total_duration_str)
+            m7.metric("⏱️ เวลาเฉลี่ย/งาน", avg_duration_str)
             
             st.markdown("---")
-            
             col_g1, col_g2 = st.columns(2)
             with col_g1:
-                st.markdown("##### 🕒 กราฟงานค้างสะสมแยกตามอายุงาน (ยังไม่เสร็จ)")
+                st.markdown("##### 🕒 กราฟงานค้างสะสมแยกตามอายุงาน")
                 df_pending = df_stats[df_stats["status"].isin(["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"])].copy()
                 
                 if df_pending.empty:
                     st.success("🎉 ไม่มีงานค้างสะสมในช่วงเวลาที่เลือก!")
                 else:
-                    def calc_age_days(r_date_val):
-                        try:
-                            r_date = pd.to_datetime(r_date_val).date()
-                            return (now_date - r_date).days
-                        except Exception:
-                            return 0
-                            
-                    df_pending["age_days"] = df_pending["report_date"].apply(calc_age_days)
+                    df_pending["age_days"] = df_pending["report_date"].apply(lambda d: (now_date - pd.to_datetime(d).date()).days if pd.notna(d) else 0)
+                    df_pending["age_group"] = df_pending["age_days"].apply(lambda d: "< 7 วัน" if d < 7 else ("7 - 15 วัน" if d <= 15 else ("16 - 30 วัน" if d <= 30 else "> 1 เดือน")))
                     
-                    def categorize_age(days):
-                        if days < 7:
-                            return "1. น้อยกว่า 7 วัน"
-                        elif 7 <= days <= 15:
-                            return "2. 7 - 15 วัน"
-                        elif 16 <= days <= 30:
-                            return "3. 16 - 30 วัน"
-                        else:
-                            return "4. มากกว่า 1 เดือน"
-                            
-                    df_pending["age_group"] = df_pending["age_days"].apply(categorize_age)
-                    
-                    age_order = ["1. น้อยกว่า 7 วัน", "2. 7 - 15 วัน", "3. 16 - 30 วัน", "4. มากกว่า 1 เดือน"]
+                    age_order = ["< 7 วัน", "7 - 15 วัน", "16 - 30 วัน", "> 1 เดือน"]
                     age_counts = df_pending["age_group"].value_counts().reindex(age_order, fill_value=0).reset_index()
-                    age_counts.columns = ["อายุงานค้าง", "จำนวนงาน"]
+                    age_counts.columns = ["ช่วงอายุงาน", "จำนวนงาน"]
                     
-                    age_display_map = {
-                        "1. น้อยกว่า 7 วัน": "< 7 วัน",
-                        "2. 7 - 15 วัน": "7 - 15 วัน",
-                        "3. 16 - 30 วัน": "16 - 30 วัน",
-                        "4. มากกว่า 1 เดือน": "> 1 เดือน"
-                    }
-                    age_counts["ช่วงอายุงาน"] = age_counts["อายุงานค้าง"].map(age_display_map)
-                    
-                    color_map = {
-                        "< 7 วัน": "#2ecc71",
-                        "7 - 15 วัน": "#f1c40f",
-                        "16 - 30 วัน": "#e67e22",
-                        "> 1 เดือน": "#e74c3c"
-                    }
-                    
-                    fig_aging = px.bar(
-                        age_counts, 
-                        x="ช่วงอายุงาน", 
-                        y="จำนวนงาน", 
-                        text="จำนวนงาน",
-                        color="ช่วงอายุงาน",
-                        color_discrete_map=color_map,
-                        title=f"รวมงานค้างทั้งหมด {len(df_pending)} รายการ"
-                    )
+                    fig_aging = px.bar(age_counts, x="ช่วงอายุงาน", y="จำนวนงาน", text="จำนวนงาน", color="ช่วงอายุงาน",
+                                       color_discrete_map={"< 7 วัน": "#2ecc71", "7 - 15 วัน": "#f1c40f", "16 - 30 วัน": "#e67e22", "> 1 เดือน": "#e74c3c"})
                     fig_aging.update_traces(textposition='outside')
-                    fig_aging.update_layout(showlegend=False, yaxis_title="จำนวนใบแจ้งซ่อม", xaxis_title="อายุงานค้าง")
                     st.plotly_chart(fig_aging, use_container_width=True)
                     
             with col_g2:
-                st.markdown("##### 📌 สัดส่วนตามสถานะงานทั้งหมด")
+                st.markdown("##### 📌 สัดส่วนตามสถานะงาน")
                 status_counts = df_stats["status"].value_counts().reset_index()
                 status_counts.columns = ["สถานะ", "จำนวน"]
                 fig_status = px.pie(status_counts, names="สถานะ", values="จำนวน", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
                 st.plotly_chart(fig_status, use_container_width=True)
 
 # =============================================================
-# TAB 4: แผนงาน PM & บันทึกก่อนทำ (Before Action)
+# TAB 4: แผนงาน PM & บันทึกก่อนทำ (PM Only)
 # =============================================================
 with tab4:
-    st.subheader("📅 แผนงาน PM & บันทึกข้อมูลก่อนทำ (Before Action)")
-    st.caption("ระบบวางแผนการบำรุงรักษาเชิงป้องกัน (PM) และบันทึกรูปถ่าย/วิดีโอสภาพเครื่องจักรก่อนทำ PM")
-    
-    df_pm_all = df[df["job_type"] == "PM"] if not df.empty else pd.DataFrame()
+    st.subheader("📅 แผนงาน PM & บันทึกข้อมูลก่อนทำ (PM - Before Action)")
+    st.caption("ระบบวางแผนการบำรุงรักษาเชิงป้องกัน (PM) และบันทึกรูปถ่าย/วิดีโอสภาพเครื่องจักรก่อนทำ PM (แยกจากงานแจ้งซ่อม)")
     
     col_pm1, col_pm2 = st.columns([1, 2])
     
     with col_pm1:
-        st.markdown("#### ➕ วางแผน/ออกใบงาน PM (ก่อนทำ)")
+        st.markdown("#### ➕ วางแผน / ออกใบงาน PM ใหม่")
+        default_pm_no = generate_ticket_no(df_pm, prefix="PM-")
+        
         with st.form("add_pm_plan_form", clear_on_submit=True):
+            pm_no = st.text_input("เลขที่ใบงาน PM *", value=default_pm_no)
             pm_equip = st.text_input("อุปกรณ์ / เครื่องจักร *", placeholder="เช่น เครื่องอัดอากาศ No.1")
             
-            existing_depts_pm = df["department"].dropna().unique().tolist() if not df.empty and "department" in df.columns else []
+            existing_depts_pm = df_pm["department"].dropna().unique().tolist() if not df_pm.empty else []
             all_depts_pm = list(dict.fromkeys(DEFAULT_DEPTS + [d for d in existing_depts_pm if d]))
             
-            pm_dept = st.selectbox("แผนก / โซน *", all_depts_pm)
+            pm_dept = st.selectbox("แผนก / โซน *", all_depts_pm, key="pm_dept_sel")
             pm_freq = st.selectbox("ความถี่ในการทำ PM", ["ทุก 1 สัปดาห์", "ทุก 1 เดือน", "ทุก 3 เดือน", "ทุก 6 เดือน", "ทุก 1 ปี"])
-            pm_next_date = st.date_input("📅 วันที่กำหนดทำ PM", value=get_thailand_now_dt().date())
+            pm_next_date = st.date_input("📅 วันที่กำหนดทำ PM", value=get_thailand_now_dt().date(), key="pm_plan_date")
             pm_note = st.text_area("รายละเอียดการตรวจเช็ก (Checklist)", placeholder="- เช็กน้ำมันเครื่อง\n- ทำความสะอาดฟิลเตอร์")
             
-            # --- ช่องอัปโหลดรูปภาพและวิดีโอประกอบก่อนทำ PM ---
             uploaded_pm_media_before = st.file_uploader(
-                "📸/🎥 อัปโหลดรูปถ่ายหรือวิดีโอ (ก่อนทำ PM)", 
+                "📸/🎥 รูปถ่ายหรือวิดีโอก่อนทำ PM", 
                 type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
                 accept_multiple_files=True,
-                key="pm_media_before_upload"
+                key="pm_media_b_upload"
             )
-            st.caption("💡 แนะนำให้อัปโหลดภาพถ่าย/วิดีโอสภาพเครื่องจักรก่อนทำ PM")
             
             btn_save_pm = st.form_submit_button("💾 บันทึกแผน PM (ก่อนทำ)", use_container_width=True)
             if btn_save_pm:
-                if not pm_equip.strip():
-                    st.error("❌ กรุณาระบุชื่ออุปกรณ์/เครื่องจักร")
+                if not pm_equip.strip() or not pm_no.strip():
+                    st.error("❌ กรุณาระบุเลขที่ใบงานและชื่ออุปกรณ์/เครื่องจักร")
                 elif not supabase:
                     st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
                 else:
-                    pm_ticket_no = generate_default_ticket_no(df)
                     pm_media_b64 = process_media_files(uploaded_pm_media_before) if uploaded_pm_media_before else ""
                     
                     new_pm_data = {
-                        "ticket_no": pm_ticket_no,
+                        "ticket_no": pm_no.strip(),
                         "reporter": "ระบบวางแผน PM",
                         "job_type": "PM",
                         "department": pm_dept,
@@ -848,26 +778,26 @@ with tab4:
                         "image_before": pm_media_b64
                     }
                     try:
-                        supabase.table("tickets").insert(new_pm_data).execute()
-                        st.success(f"✅ บันทึกแผน PM เรียบร้อย! ออกใบงานเลขที่: **{pm_ticket_no}**")
+                        save_data_to_supabase("pm_tickets", new_pm_data)
+                        st.success(f"✅ บันทึกแผน PM เรียบร้อย! ออกใบงานเลขที่: **{pm_no}**")
                         st.rerun()
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
 
     with col_pm2:
         st.markdown("#### 📋 รายการงาน PM และสื่อประกอบก่อนทำ")
-        if df_pm_all.empty:
+        if df_pm.empty:
             st.info("ยังไม่มีข้อมูลแผนงาน PM ในระบบ")
         else:
-            pm_status_filter = st.multiselect("กรองสถานะ PM", ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"])
-            df_pm_show = df_pm_all[df_pm_all["status"].isin(pm_status_filter)]
+            pm_status_filter = st.multiselect("กรองสถานะ PM", ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"], key="pm_status_f")
+            df_pm_show = df_pm[df_pm["status"].isin(pm_status_filter)]
             
             if df_pm_show.empty:
                 st.warning("ไม่พบรายการ PM ตามสถานะที่กรอง")
             else:
                 pm_display_cols = ["ticket_no", "report_date", "department", "equipment", "description", "status"]
                 df_pm_view = df_pm_show[pm_display_cols].copy()
-                df_pm_view.columns = ["เลขที่ใบงาน", "กำหนดวันที่ทำ", "แผนก", "อุปกรณ์/เครื่องจักร", "รายละเอียด PM", "สถานะ"]
+                df_pm_view.columns = ["เลขที่ใบงาน PM", "กำหนดวันที่ทำ", "แผนก", "อุปกรณ์/เครื่องจักร", "รายละเอียด PM", "สถานะ"]
                 
                 st.dataframe(apply_status_style(df_pm_view), use_container_width=True)
 
@@ -876,7 +806,7 @@ with tab4:
                 selected_pm_ticket = st.selectbox(
                     "เลือกเลขที่ใบงาน PM เพื่อดูรูปภาพ/วิดีโอก่อนทำ:", 
                     df_pm_show["ticket_no"].tolist(),
-                    key="select_pm_media_before_view"
+                    key="sel_pm_media_b_view"
                 )
                 
                 if selected_pm_ticket:
@@ -884,50 +814,44 @@ with tab4:
                     display_media_gallery(pm_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM (Before Action)")
 
 # =============================================================
-# TAB 5: บันทึกผล PM & ตรวจสอบหลังทำ (After Action)
+# TAB 5: บันทึกผล PM & ตรวจสอบหลังทำ (PM Only)
 # =============================================================
 with tab5:
-    st.subheader("✅ บันทึกผล PM & ตรวจสอบงานหลังทำ (After Action)")
-    st.caption("ศูนย์กลางการบันทึกผลการทำ PM/งานซ่อม บันทึกรูปถ่าย/วิดีโอหลังทำเสร็จ และเปรียบเทียบรูปภาพก่อนทำ-หลังทำ")
+    st.subheader("✅ บันทึกผล PM & ตรวจสอบงานหลังทำ (PM - After Action)")
+    st.caption("บันทึกผลการทำ PM, รูปถ่าย/วิดีโอหลังทำเสร็จ และเปรียบเทียบรูปภาพ ก่อนทำ VS หลังทำ ของงาน PM")
 
     st_sub1, st_sub2, st_sub3 = st.tabs([
-        "📝 บันทึกผลการทำ PM / งานหลังทำ", 
+        "📝 บันทึกผลการทำ PM (หลังทำ)", 
         "📸 ตรวจสอบสื่อประกอบ (ก่อนทำ VS หลังทำ)",
-        "📊 กระดานติดตามสถานะ & สรุปประวัติงาน"
+        "📊 ตารางประวัติงาน PM ทั้งหมด"
     ])
 
-    # -------------------------------------------------------------
-    # Sub-tab 1: บันทึกผลการทำ PM / อัปโหลดสื่อหลังทำ
-    # -------------------------------------------------------------
+    # Sub-tab 1: บันทึกผลการทำ PM
     with st_sub1:
-        st.markdown("#### 🛠️ บันทึกผลการดำเนินงาน PM / ปิดงานซ่อม (หลังทำ)")
+        st.markdown("#### 🛠️ บันทึกผลการดำเนินงาน PM / ปิดงาน (หลังทำ)")
         
-        if df.empty:
-            st.info("ยังไม่มีข้อมูลใบงานในระบบ")
+        if df_pm.empty:
+            st.info("ยังไม่มีข้อมูลใบงาน PM ในระบบ")
         else:
-            active_pm_tickets = df[df["status"].isin(["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"])]["ticket_no"].tolist()
-            all_tickets_list = df["ticket_no"].tolist()
+            active_pm_tickets = df_pm[df_pm["status"].isin(["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"])]["ticket_no"].tolist()
+            all_pm_tickets_list = df_pm["ticket_no"].tolist()
             
             selected_after_ticket = st.selectbox(
-                "เลือกเลขที่ใบงานเพื่อบันทึกผลหลังทำ:",
-                options=active_pm_tickets if active_pm_tickets else all_tickets_list,
-                key="after_ticket_select"
+                "เลือกเลขที่ใบงาน PM เพื่อบันทึกผลหลังทำ:",
+                options=active_pm_tickets if active_pm_tickets else all_pm_tickets_list,
+                key="pm_after_ticket_sel"
             )
             
             if selected_after_ticket:
-                target_item = df[df["ticket_no"] == selected_after_ticket].iloc[0]
+                target_item = df_pm[df_pm["ticket_no"] == selected_after_ticket].iloc[0]
                 
-                st.info(f"📌 **ใบงาน:** {target_item.get('ticket_no')} | **ประเภท:** {target_item.get('job_type')} | **อุปกรณ์:** {target_item.get('equipment')} | **แผนก:** {target_item.get('department')}")
+                st.info(f"📌 **ใบงาน PM:** {target_item.get('ticket_no')} | **อุปกรณ์:** {target_item.get('equipment')} | **แผนก:** {target_item.get('department')}")
                 
                 with st.form("pm_after_form"):
                     col_af1, col_af2 = st.columns(2)
                     with col_af1:
                         tech_name = st.text_input("ช่างผู้รับผิดชอบ / ผู้ตรวจเช็ก *", value=str(target_item.get("technician", "") or ""))
-                        after_status = st.selectbox(
-                            "สถานะหลังดำเนินงาน *",
-                            ["เสร็จสิ้น", "กำลังดำเนินการ", "รออะไหล่", "ยกเลิก"],
-                            index=0
-                        )
+                        after_status = st.selectbox("สถานะหลังดำเนินงาน *", ["เสร็จสิ้น", "กำลังดำเนินการ", "รออะไหล่", "ยกเลิก"], index=0, key="pm_status_af")
                     with col_af2:
                         now_dt_after = get_thailand_now_dt()
                         init_c_date = parse_date(target_item.get("completed_date"), now_dt_after.date())
@@ -935,9 +859,9 @@ with tab5:
                         
                         col_cd1, col_ct1 = st.columns(2)
                         with col_cd1:
-                            comp_date_in = st.date_input("📅 วันที่ทำเสร็จ", value=init_c_date)
+                            comp_date_in = st.date_input("📅 วันที่ทำเสร็จ", value=init_c_date, key="pm_cd_in")
                         with col_ct1:
-                            comp_time_in = st.time_input("⏰ เวลาที่ทำเสร็จ", value=init_c_time)
+                            comp_time_in = st.time_input("⏰ เวลาที่ทำเสร็จ", value=init_c_time, key="pm_ct_in")
                             
                     col_af3, col_af4 = st.columns(2)
                     with col_af3:
@@ -950,18 +874,16 @@ with tab5:
                     st.markdown("---")
                     st.markdown("#### 📸/🎥 อัปโหลดรูปภาพ / วิดีโอ **หลังทำ PM (After Action)**")
                     
-                    # แสดงรูปเดิมหลังทำถ้ามี
                     display_media_gallery(target_item.get("image_after", ""), title="สื่อประกอบหลังทำปัจจุบัน")
                     
                     uploaded_pm_media_after = st.file_uploader(
-                        "📸/🎥 อัปโหลดรูปถ่ายหรือวิดีโอผลงาน (หลังทำ PM / ซ่อมเสร็จ)", 
+                        "📸/🎥 อัปโหลดรูปถ่ายหรือวิดีโอผลงาน (หลังทำ PM)", 
                         type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
                         accept_multiple_files=True,
                         key="pm_media_after_upload"
                     )
-                    st.caption("💡 แนบภาพถ่ายหลังทำความสะอาด เปลี่ยนอะไหล่ หรือคลิปวิดีโอทดสอบการทำงานหลังซ่อมเสร็จได้หลายไฟล์")
                     
-                    btn_save_after = st.form_submit_button("💾 บันทึกผลการทำ PM และปิดงาน (หลังทำ)", use_container_width=True)
+                    btn_save_after = st.form_submit_button("💾 บันทึกผลการทำ PM", use_container_width=True)
                     
                     if btn_save_after:
                         if not tech_name.strip():
@@ -969,10 +891,7 @@ with tab5:
                         elif not supabase:
                             st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
                         else:
-                            if uploaded_pm_media_after:
-                                media_after_b64 = process_media_files(uploaded_pm_media_after)
-                            else:
-                                media_after_b64 = str(target_item.get("image_after", "") or "")
+                            media_after_b64 = process_media_files(uploaded_pm_media_after) if uploaded_pm_media_after else str(target_item.get("image_after", "") or "")
                                 
                             c_at_str = None
                             c_d_str = None
@@ -997,56 +916,44 @@ with tab5:
                             }
                             
                             try:
-                                supabase.table("tickets").update(update_after_data).eq("id", target_item["id"]).execute()
-                                st.success(f"✅ บันทึกผลหลังทำ PM และอัปเดตสถานะเป็น '{after_status}' เรียบร้อยแล้ว!")
+                                update_data_in_supabase("pm_tickets", update_after_data, target_item["id"])
+                                st.success(f"✅ บันทึกผลหลังทำ PM ใบงาน **{target_item.get('ticket_no')}** เรียบร้อยแล้ว!")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
 
-    # -------------------------------------------------------------
-    # Sub-tab 2: ตรวจสอบและเปรียบเทียบสื่อ (ก่อนทำ VS หลังทำ)
-    # -------------------------------------------------------------
+    # Sub-tab 2: เปรียบเทียบ Before vs After
     with st_sub2:
-        st.markdown("#### 📸 เปรียบเทียบสื่อประกอบ (ภาพถ่าย / วิดีโอ) ก่อนทำ VS หลังทำ")
+        st.markdown("#### 📸 เปรียบเทียบสื่อประกอบ Before VS After ของงาน PM")
         
-        if df.empty:
-            st.info("ยังไม่มีข้อมูลใบงานในระบบ")
+        if df_pm.empty:
+            st.info("ยังไม่มีข้อมูลใบงาน PM ในระบบ")
         else:
             compare_ticket_no = st.selectbox(
-                "เลือกใบงานเพื่อเปรียบเทียบรูปภาพ/วิดีโอ:",
-                df["ticket_no"].tolist(),
-                key="compare_media_ticket_select"
+                "เลือกใบงาน PM เพื่อเปรียบเทียบรูปภาพ/วิดีโอ:",
+                df_pm["ticket_no"].tolist(),
+                key="pm_compare_media_sel"
             )
             
             if compare_ticket_no:
-                c_item = df[df["ticket_no"] == compare_ticket_no].iloc[0]
-                
-                st.markdown(f"**ใบงานเลขที่:** `{c_item.get('ticket_no')}` | **อุปกรณ์:** {c_item.get('equipment')} | **สถานะ:** {c_item.get('status')}")
+                c_item = df_pm[df_pm["ticket_no"] == compare_ticket_no].iloc[0]
+                st.markdown(f"**ใบงาน PM เลขที่:** `{c_item.get('ticket_no')}` | **อุปกรณ์:** {c_item.get('equipment')} | **สถานะ:** {c_item.get('status')}")
                 
                 col_comp1, col_comp2 = st.columns(2)
                 with col_comp1:
-                    st.markdown("### 🔴 ก่อนทำ (Before Action)")
-                    display_media_gallery(c_item.get("image_before", ""), title="สื่อประกอบก่อนทำ")
+                    st.markdown("### 🔴 ก่อนทำ PM (Before Action)")
+                    display_media_gallery(c_item.get("image_before", ""), title="สื่อประกอบก่อนทำ PM")
                 with col_comp2:
-                    st.markdown("### 🟢 หลังทำ (After Action)")
-                    display_media_gallery(c_item.get("image_after", ""), title="สื่อประกอบหลังทำ")
+                    st.markdown("### 🟢 หลังทำ PM (After Action)")
+                    display_media_gallery(c_item.get("image_after", ""), title="สื่อประกอบหลังทำ PM")
 
-    # -------------------------------------------------------------
-    # Sub-tab 3: กระดานติดตามสถานะ & สรุปประวัติงาน
-    # -------------------------------------------------------------
+    # Sub-tab 3: สรุปประวัติงาน PM
     with st_sub3:
-        st.markdown("#### 📊 กระดานติดตามสถานะงาน และสรุปผลงานหลังทำ")
-        
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("⏳ รอดำเนินการ", f"{len(df[df['status'] == 'รอดำเนินการ'])} งาน")
-        c2.metric("🔄 กำลังดำเนินการ", f"{len(df[df['status'] == 'กำลังดำเนินการ'])} งาน")
-        c3.metric("📦 รออะไหล่", f"{len(df[df['status'] == 'รออะไหล่'])} งาน")
-        c4.metric("✅ เสร็จสิ้นแล้ว", f"{len(df[df['status'] == 'เสร็จสิ้น'])} งาน")
-        
-        st.markdown("---")
-        st.markdown("#### 📜 ตารางสรุปประวัติผลงานหลังทำทั้งหมด")
-        
-        show_cols = ["ticket_no", "job_type", "department", "equipment", "technician", "solution", "completed_date", "status"]
-        df_after_view = df[show_cols].copy()
-        df_after_view.columns = ["เลขที่ใบงาน", "ประเภท", "แผนก", "อุปกรณ์", "ช่างผู้ทำ", "วิธีแก้ไข/ผลการทำ PM", "วันที่เสร็จ", "สถานะ"]
-        st.dataframe(apply_status_style(df_after_view), use_container_width=True)
+        st.markdown("#### 📜 ตารางสรุปผลงาน PM ทั้งหมด")
+        if df_pm.empty:
+            st.info("ยังไม่มีข้อมูลประวัติงาน PM")
+        else:
+            show_cols = ["ticket_no", "department", "equipment", "technician", "solution", "completed_date", "status"]
+            df_pm_after_view = df_pm[show_cols].copy()
+            df_pm_after_view.columns = ["เลขที่ใบงาน PM", "แผนก", "อุปกรณ์", "ช่างผู้ทำ", "ผลการทำ PM", "วันที่เสร็จ", "สถานะ"]
+            st.dataframe(apply_status_style(df_pm_after_view), use_container_width=True)
