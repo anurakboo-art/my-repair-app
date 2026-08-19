@@ -193,13 +193,12 @@ COLUMN_NAMES = [
 ]
 
 # -------------------------------------------------------------
-# Database Loader Functions (แยกข้อมูล Tab 1-2 และ Tab 4-5)
+# Database Loader Functions
 # -------------------------------------------------------------
 def load_data_by_table(table_name="tickets", job_type_filter=None):
     if not supabase:
         return pd.DataFrame(columns=COLUMN_NAMES)
     try:
-        # ลองดึงจากตารางเฉพาะก่อน
         res = supabase.table(table_name).select("*").execute()
         df = pd.DataFrame(res.data)
         if df.empty:
@@ -214,7 +213,6 @@ def load_data_by_table(table_name="tickets", job_type_filter=None):
         df = df.sort_values(by=["sort_dt", "created_at"], ascending=[True, True]).drop(columns=["sort_dt"])
         return df
     except Exception:
-        # หากยังไม่มีตารางแยก ให้ Fallback กลับมาดึงจากตาราง 'tickets' หลักตาม job_type
         try:
             res = supabase.table("tickets").select("*").execute()
             df = pd.DataFrame(res.data)
@@ -237,14 +235,12 @@ def save_data_to_supabase(primary_table, data):
     try:
         return supabase.table(primary_table).insert(data).execute()
     except Exception:
-        # Fallback to tickets table
         return supabase.table("tickets").insert(data).execute()
 
 def update_data_in_supabase(primary_table, data, record_id):
     try:
         return supabase.table(primary_table).update(data).eq("id", record_id).execute()
     except Exception:
-        # Fallback to tickets table
         return supabase.table("tickets").update(data).eq("id", record_id).execute()
 
 def generate_ticket_no(df, prefix="REP-"):
@@ -478,8 +474,9 @@ with tab2:
                 st.markdown("🕒 **วันและเวลาที่แจ้ง**")
                 col_rd, col_rt = st.columns(2)
                 
-                init_rep_date = parse_date(ticket["report_date"], now_dt.date())
-                init_rep_time = parse_time(ticket["report_time"], now_dt.time().replace(microsecond=0))
+                now_dt_rep = get_thailand_now_dt()
+                init_rep_date = parse_date(ticket["report_date"], now_dt_rep.date())
+                init_rep_time = parse_time(ticket["report_time"], now_dt_rep.time().replace(microsecond=0))
                 
                 with col_rd:
                     report_date_edit = st.date_input("📅 วันที่แจ้ง", value=init_rep_date, key="edit_rep_date")
@@ -506,8 +503,8 @@ with tab2:
                 with col_rcv1:
                     received_no_input = st.text_input("เลขที่รับงาน / ใบรับ", value=curr_rcv_no)
                 
-                init_rcv_date = parse_date(ticket.get("received_date"), now_dt.date())
-                init_rcv_time = parse_time(ticket.get("received_time"), now_dt.time().replace(microsecond=0))
+                init_rcv_date = parse_date(ticket.get("received_date"), now_dt_rep.date())
+                init_rcv_time = parse_time(ticket.get("received_time"), now_dt_rep.time().replace(microsecond=0))
                 
                 with col_rcv2:
                     received_date_input = st.date_input("📅 วันที่รับงาน", value=init_rcv_date, key="rcv_rep_date")
@@ -540,8 +537,8 @@ with tab2:
                 st.markdown("🕒 **วันและเวลาซ่อมเสร็จ**")
                 col_cd, col_ct = st.columns(2)
                 
-                init_comp_date = parse_date(ticket.get("completed_date"), now_dt.date())
-                init_comp_time = parse_time(ticket.get("completed_time"), now_dt.time().replace(microsecond=0))
+                init_comp_date = parse_date(ticket.get("completed_date"), now_dt_rep.date())
+                init_comp_time = parse_time(ticket.get("completed_time"), now_dt_rep.time().replace(microsecond=0))
                 
                 with col_cd:
                     completed_date = st.date_input("📅 วันที่ซ่อมเสร็จ", value=init_comp_date, key="rep_comp_date")
@@ -731,6 +728,8 @@ with tab4:
     
     col_pm1, col_pm2 = st.columns([1, 2])
     
+    now_dt_pm = get_thailand_now_dt()
+    
     with col_pm1:
         st.markdown("#### ➕ วางแผน / ออกใบงาน PM ใหม่")
         default_pm_no = generate_ticket_no(df_pm, prefix="PM-")
@@ -744,7 +743,14 @@ with tab4:
             
             pm_dept = st.selectbox("แผนก / โซน *", all_depts_pm, key="pm_dept_sel")
             pm_freq = st.selectbox("ความถี่ในการทำ PM", ["ทุก 1 สัปดาห์", "ทุก 1 เดือน", "ทุก 3 เดือน", "ทุก 6 เดือน", "ทุก 1 ปี"])
-            pm_next_date = st.date_input("📅 วันที่กำหนดทำ PM", value=get_thailand_now_dt().date(), key="pm_plan_date")
+            
+            st.markdown("🕒 **วันและเวลาที่ตรวจพบ * **")
+            col_pm_dd, col_pm_dt = st.columns(2)
+            with col_pm_dd:
+                pm_detected_date = st.date_input("📅 วันที่ตรวจพบ", value=now_dt_pm.date(), key="pm_det_date")
+            with col_pm_dt:
+                pm_detected_time = st.time_input("⏰ เวลาที่ตรวจพบ", value=now_dt_pm.time().replace(microsecond=0), key="pm_det_time")
+                
             pm_note = st.text_area("รายละเอียดการตรวจเช็ก (Checklist)", placeholder="- เช็กน้ำมันเครื่อง\n- ทำความสะอาดฟิลเตอร์")
             
             uploaded_pm_media_before = st.file_uploader(
@@ -762,6 +768,7 @@ with tab4:
                     st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
                 else:
                     pm_media_b64 = process_media_files(uploaded_pm_media_before) if uploaded_pm_media_before else ""
+                    created_at_str = datetime.combine(pm_detected_date, pm_detected_time).replace(tzinfo=THAILAND_TZ).isoformat()
                     
                     new_pm_data = {
                         "ticket_no": pm_no.strip(),
@@ -772,9 +779,9 @@ with tab4:
                         "description": f"[แผน PM: {pm_freq}] {pm_note.strip()}",
                         "priority": "ปกติ",
                         "status": "รอดำเนินการ",
-                        "report_date": str(pm_next_date),
-                        "report_time": "08:00:00",
-                        "created_at": datetime.combine(pm_next_date, datetime.min.time()).replace(tzinfo=THAILAND_TZ).isoformat(),
+                        "report_date": str(pm_detected_date),
+                        "report_time": pm_detected_time.strftime("%H:%M:%S"),
+                        "created_at": created_at_str,
                         "image_before": pm_media_b64
                     }
                     try:
@@ -795,9 +802,9 @@ with tab4:
             if df_pm_show.empty:
                 st.warning("ไม่พบรายการ PM ตามสถานะที่กรอง")
             else:
-                pm_display_cols = ["ticket_no", "report_date", "department", "equipment", "description", "status"]
+                pm_display_cols = ["ticket_no", "report_date", "report_time", "department", "equipment", "description", "status"]
                 df_pm_view = df_pm_show[pm_display_cols].copy()
-                df_pm_view.columns = ["เลขที่ใบงาน PM", "กำหนดวันที่ทำ", "แผนก", "อุปกรณ์/เครื่องจักร", "รายละเอียด PM", "สถานะ"]
+                df_pm_view.columns = ["เลขที่ใบงาน PM", "วันที่ตรวจพบ", "เวลาที่ตรวจพบ", "แผนก", "อุปกรณ์/เครื่องจักร", "รายละเอียด PM", "สถานะ"]
                 
                 st.dataframe(apply_status_style(df_pm_view), use_container_width=True)
 
