@@ -491,11 +491,12 @@ with tab2:
                 
                 display_media_gallery(ticket.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนซ่อมปัจจุบัน")
                 
+                # ใช้ dynamic key อิงตาม id ใบซ่อม
                 uploaded_media_b_new = st.file_uploader(
                     "📸/🎥 เปลี่ยน/อัปโหลดเพิ่ม รูปหรือวิดีโอก่อนซ่อม",
                     type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
                     accept_multiple_files=True,
-                    key="edit_rep_img_b"
+                    key=f"edit_rep_img_b_{ticket['id']}"
                 )
                 
                 st.markdown("---")
@@ -553,11 +554,12 @@ with tab2:
                 
                 display_media_gallery(ticket.get("image_after", ""), title="📸/🎥 สื่อประกอบหลังซ่อมปัจจุบัน")
                 
+                # ใช้ dynamic key อิงตาม id ใบซ่อม
                 uploaded_media_a_new = st.file_uploader(
                     "📸/🎥 อัปโหลด/เปลี่ยน รูปหรือวิดีโอหลังซ่อมเสร็จ",
                     type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
                     accept_multiple_files=True,
-                    key="edit_rep_img_a"
+                    key=f"edit_rep_img_a_{ticket['id']}"
                 )
                 
                 update_submitted = st.form_submit_button("💾 บันทึกการอัปเดตงานซ่อม", use_container_width=True)
@@ -888,7 +890,7 @@ with tab5:
                 
                 now_dt_after = get_thailand_now_dt()
                 
-                with st.form("pm_after_form"):
+                with st.form(f"pm_after_form_{target_item['id']}"):
                     st.markdown("🕒 **ข้อมูลวัน-เวลาการตรวจพบ และ วัน-เวลาทำเสร็จ**")
                     
                     col_det1, col_det2 = st.columns(2)
@@ -896,9 +898,9 @@ with tab5:
                     init_det_time = parse_time(target_item.get("report_time"), now_dt_after.time().replace(microsecond=0))
                     
                     with col_det1:
-                        det_date_in = st.date_input("📅 วันที่ตรวจพบ", value=init_det_date, key="pm_det_d_in")
+                        det_date_in = st.date_input("📅 วันที่ตรวจพบ", value=init_det_date, key=f"pm_det_d_in_{target_item['id']}")
                     with col_det2:
-                        det_time_in = st.time_input("⏰ เวลาที่ตรวจพบ", value=init_det_time, key="pm_det_t_in")
+                        det_time_in = st.time_input("⏰ เวลาที่ตรวจพบ", value=init_det_time, key=f"pm_det_t_in_{target_item['id']}")
                         
                     st.markdown("---")
                     
@@ -910,7 +912,7 @@ with tab5:
                     
                     with col_af1:
                         tech_name = st.text_input("ช่างผู้รับผิดชอบ / ผู้ตรวจเช็ก *", value=str(target_item.get("technician", "") or ""))
-                        after_status = st.selectbox("สถานะหลังดำเนินงาน *", status_options_pm, index=curr_pm_status_idx, key="pm_status_af")
+                        after_status = st.selectbox("สถานะหลังดำเนินงาน *", status_options_pm, index=curr_pm_status_idx, key=f"pm_status_af_{target_item['id']}")
                     
                     with col_af2:
                         init_c_date = parse_date(target_item.get("completed_date"), now_dt_after.date())
@@ -918,9 +920,9 @@ with tab5:
                         
                         col_cd1, col_ct1 = st.columns(2)
                         with col_cd1:
-                            comp_date_in = st.date_input("📅 วันที่ทำเสร็จ", value=init_c_date, key="pm_cd_in")
+                            comp_date_in = st.date_input("📅 วันที่ทำเสร็จ", value=init_c_date, key=f"pm_cd_in_{target_item['id']}")
                         with col_ct1:
-                            comp_time_in = st.time_input("⏰ เวลาที่ทำเสร็จ", value=init_c_time, key="pm_ct_in")
+                            comp_time_in = st.time_input("⏰ เวลาที่ทำเสร็จ", value=init_c_time, key=f"pm_ct_in_{target_item['id']}")
                             
                     col_af3, col_af4 = st.columns(2)
                     with col_af3:
@@ -935,11 +937,12 @@ with tab5:
                     
                     display_media_gallery(target_item.get("image_after", ""), title="สื่อประกอบหลังทำปัจจุบัน")
                     
+                    # ใช้ dynamic key อิงตาม id ใบงาน PM
                     uploaded_pm_media_after = st.file_uploader(
                         "📸/🎥 เปลี่ยน/อัปโหลดเพิ่ม รูปถ่ายหรือวิดีโอผลงาน (หลังทำ PM)", 
                         type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
                         accept_multiple_files=True,
-                        key="pm_media_after_upload"
+                        key=f"pm_media_after_upload_{target_item['id']}"
                     )
                     
                     btn_save_after = st.form_submit_button("💾 บันทึก / อัปเดตข้อมูลผล PM", use_container_width=True)
