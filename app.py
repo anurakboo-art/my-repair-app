@@ -874,9 +874,35 @@ with tab5:
                 target_item = df_pm[df_pm["ticket_no"] == selected_after_ticket].iloc[0]
                 
                 status_color = "🟢" if target_item.get("status") == "เสร็จสิ้น" else "🟡"
-                st.info(f"📌 **ลำดับที่:** `{target_item.get('ticket_no')}` | **อุปกรณ์:** {target_item.get('equipment')} | **แผนก:** {target_item.get('department')} | **สถานะปัจจุบัน:** {status_color} {target_item.get('status')}")
+                
+                # ดึงวันที่และเวลาที่ตรวจพบ
+                det_date_val = str(target_item.get("report_date", "-") or "-")
+                det_time_val = str(target_item.get("report_time", "") or "")
+                
+                st.info(
+                    f"📌 **ลำดับที่:** `{target_item.get('ticket_no')}` | "
+                    f"**อุปกรณ์:** {target_item.get('equipment')} | "
+                    f"**แผนก:** {target_item.get('department')} | "
+                    f"📅 **วันที่ตรวจพบ:** {det_date_val} {det_time_val} | "
+                    f"**สถานะปัจจุบัน:** {status_color} {target_item.get('status')}"
+                )
+                
+                now_dt_after = get_thailand_now_dt()
                 
                 with st.form("pm_after_form"):
+                    st.markdown("🕒 **ข้อมูลวัน-เวลาการตรวจพบ และ วัน-เวลาทำเสร็จ**")
+                    
+                    col_det1, col_det2 = st.columns(2)
+                    init_det_date = parse_date(target_item.get("report_date"), now_dt_after.date())
+                    init_det_time = parse_time(target_item.get("report_time"), now_dt_after.time().replace(microsecond=0))
+                    
+                    with col_det1:
+                        det_date_in = st.date_input("📅 วันที่ตรวจพบ", value=init_det_date, key="pm_det_d_in")
+                    with col_det2:
+                        det_time_in = st.time_input("⏰ เวลาที่ตรวจพบ", value=init_det_time, key="pm_det_t_in")
+                        
+                    st.markdown("---")
+                    
                     col_af1, col_af2 = st.columns(2)
                     
                     status_options_pm = ["เสร็จสิ้น", "กำลังดำเนินการ", "รออะไหล่", "รอดำเนินการ"]
@@ -888,7 +914,6 @@ with tab5:
                         after_status = st.selectbox("สถานะหลังดำเนินงาน *", status_options_pm, index=curr_pm_status_idx, key="pm_status_af")
                     
                     with col_af2:
-                        now_dt_after = get_thailand_now_dt()
                         init_c_date = parse_date(target_item.get("completed_date"), now_dt_after.date())
                         init_c_time = parse_time(target_item.get("completed_time"), now_dt_after.time().replace(microsecond=0))
                         
@@ -937,7 +962,12 @@ with tab5:
                                 c_t_str = comp_time_in.strftime("%H:%M:%S")
                                 c_at_str = datetime.combine(comp_date_in, comp_time_in).replace(tzinfo=THAILAND_TZ).isoformat()
                                 
+                            created_at_str = datetime.combine(det_date_in, det_time_in).replace(tzinfo=THAILAND_TZ).isoformat()
+
                             update_after_data = {
+                                "report_date": str(det_date_in),
+                                "report_time": det_time_in.strftime("%H:%M:%S"),
+                                "created_at": created_at_str,
                                 "technician": tech_name.strip(),
                                 "status": after_status,
                                 "detected_symptom": symptom_after,
@@ -988,7 +1018,7 @@ with tab5:
         if df_pm.empty:
             st.info("ยังไม่มีข้อมูลประวัติงาน PM")
         else:
-            show_cols = ["ticket_no", "department", "equipment", "technician", "solution", "completed_date", "status"]
+            show_cols = ["ticket_no", "report_date", "department", "equipment", "technician", "solution", "completed_date", "status"]
             df_pm_after_view = df_pm[show_cols].copy()
-            df_pm_after_view.columns = ["ลำดับที่", "แผนก", "อุปกรณ์", "ช่างผู้ทำ", "ผลการทำ PM", "วันที่เสร็จ", "สถานะ"]
+            df_pm_after_view.columns = ["ลำดับที่", "วันที่ตรวจพบ", "แผนก", "อุปกรณ์", "ช่างผู้ทำ", "ผลการทำ PM", "วันที่เสร็จ", "สถานะ"]
             st.dataframe(apply_status_style(df_pm_after_view), use_container_width=True)
