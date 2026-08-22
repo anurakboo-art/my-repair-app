@@ -193,7 +193,7 @@ COLUMN_NAMES = [
 ]
 
 # -------------------------------------------------------------
-# Database Loader Functions
+# Database Loader & CRUD Functions
 # -------------------------------------------------------------
 def load_data_by_table(table_name="tickets", job_type_filter=None):
     if not supabase:
@@ -242,6 +242,12 @@ def update_data_in_supabase(primary_table, data, record_id):
         return supabase.table(primary_table).update(data).eq("id", record_id).execute()
     except Exception:
         return supabase.table("tickets").update(data).eq("id", record_id).execute()
+
+def delete_data_in_supabase(primary_table, record_id):
+    try:
+        return supabase.table(primary_table).delete().eq("id", record_id).execute()
+    except Exception:
+        return supabase.table("tickets").delete().eq("id", record_id).execute()
 
 def generate_ticket_no(df, prefix="REP-"):
     now = get_thailand_now_dt()
@@ -795,7 +801,7 @@ with tab4:
         if df_pm.empty:
             st.info("ยังไม่มีข้อมูลแผนงาน PM ในระบบ")
         else:
-            pm_status_filter = st.multiselect("กรองสถานะ PM", ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"], key="pm_status_f")
+            pm_status_filter = st.multiselect("กรองสถานะ PM", ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น"], default=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"], key="pm_status_f")
             df_pm_show = df_pm[df_pm["status"].isin(pm_status_filter)]
             
             if df_pm_show.empty:
@@ -808,7 +814,7 @@ with tab4:
                 st.dataframe(apply_status_style(df_pm_view), use_container_width=True)
 
                 st.markdown("---")
-                st.markdown("#### 🔍 ตรวจสอบ / จัดการใบบันทึก PM")
+                st.markdown("#### 🔍 ตรวจสอบ / ลบยกเลิกใบบันทึก PM")
                 selected_pm_ticket = st.selectbox(
                     "เลือกลำดับที่ PM เพื่อดูรูปภาพหรือยกเลิกรายการ:", 
                     df_pm_show["ticket_no"].tolist(),
@@ -820,26 +826,21 @@ with tab4:
                     display_media_gallery(pm_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM (Before Action)")
                     
                     st.markdown("---")
-                    st.markdown("##### 🚨 จัดการสถานะ / ยกเลิกใบบันทึก PM")
+                    st.markdown("##### 🗑️ กดยกเลิกและลบใบบันทึก PM ออกจากระบบ")
                     
-                    if pm_item["status"] == "ยกเลิก":
-                        st.error(f"❌ ใบบันทึก PM นี้ถูกยกเลิกแล้ว (เหตุผล: {pm_item.get('cause') or 'ไม่ได้ระบุ'})")
-                    else:
-                        with st.popover("🚨 กดยกเลิกใบบันทึก PM นี้", use_container_width=True):
-                            st.warning(f"คุณกำลังจะยกเลิกใบบันทึก PM ลำดับที่: **{selected_pm_ticket}**")
-                            cancel_reason = st.text_input("ระบุเหตุผลที่ยกเลิก (ถ้ามี):", placeholder="เช่น ออกใบงานซ้ำ / เลื่อนการเช็กไปรอบหน้า", key=f"cancel_reason_{pm_item['id']}")
-                            
-                            if st.button("Confirm: ยืนยันยกเลิกใบ PM", type="primary", use_container_width=True, key=f"btn_cancel_{pm_item['id']}"):
-                                update_cancel_payload = {
-                                    "status": "ยกเลิก",
-                                    "cause": cancel_reason.strip() if cancel_reason.strip() else "ยกเลิกจากฟอร์มบันทึก PM"
-                                }
+                    with st.popover("🗑️ ยืนยันยกเลิกและลบใบบันทึก PM นี้", use_container_width=True):
+                        st.warning(f"⚠️ รายการลำดับที่ **{selected_pm_ticket}** จะถูกลบออกจากระบบทันทีและไม่สามารถกู้คืนได้")
+                        
+                        if st.button("Confirm: ยืนยันยกเลิกและลบใบ PM นี้ทันที", type="primary", use_container_width=True, key=f"btn_delete_{pm_item['id']}"):
+                            if not supabase:
+                                st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
+                            else:
                                 try:
-                                    update_data_in_supabase("pm_tickets", update_cancel_payload, pm_item["id"])
-                                    st.success(f"✅ ยกเลิกใบบันทึก PM ลำดับที่ **{selected_pm_ticket}** สำเร็จแล้ว!")
+                                    delete_data_in_supabase("pm_tickets", pm_item["id"])
+                                    st.success(f"✅ ลบและยกเลิกใบบันทึก PM ลำดับที่ **{selected_pm_ticket}** สำเร็จแล้ว!")
                                     st.rerun()
                                 except Exception as e:
-                                    st.error(f"เกิดข้อผิดพลาดในการยกเลิก: {e}")
+                                    st.error(f"เกิดข้อผิดพลาดในการลบข้อมูล: {e}")
 
 # =============================================================
 # TAB 5: บันทึกผล PM & ตรวจสอบหลังทำ (PM Only)
@@ -879,7 +880,7 @@ with tab5:
                     col_af1, col_af2 = st.columns(2)
                     with col_af1:
                         tech_name = st.text_input("ช่างผู้รับผิดชอบ / ผู้ตรวจเช็ก *", value=str(target_item.get("technician", "") or ""))
-                        after_status = st.selectbox("สถานะหลังดำเนินงาน *", ["เสร็จสิ้น", "กำลังดำเนินการ", "รออะไหล่", "ยกเลิก"], index=0, key="pm_status_af")
+                        after_status = st.selectbox("สถานะหลังดำเนินงาน *", ["เสร็จสิ้น", "กำลังดำเนินการ", "รออะไหล่"], index=0, key="pm_status_af")
                     with col_af2:
                         now_dt_after = get_thailand_now_dt()
                         init_c_date = parse_date(target_item.get("completed_date"), now_dt_after.date())
