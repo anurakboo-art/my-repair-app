@@ -742,7 +742,6 @@ with tab4:
             all_depts_pm = list(dict.fromkeys(DEFAULT_DEPTS + [d for d in existing_depts_pm if d]))
             
             pm_dept = st.selectbox("แผนก / โซน *", all_depts_pm, key="pm_dept_sel")
-            pm_freq = st.selectbox("ความถี่ในการทำ PM", ["ทุก 1 สัปดาห์", "ทุก 1 เดือน", "ทุก 3 เดือน", "ทุก 6 เดือน", "ทุก 1 ปี"])
             
             st.markdown("🕒 **วันและเวลาที่ตรวจพบ * **")
             col_pm_dd, col_pm_dt = st.columns(2)
@@ -776,7 +775,7 @@ with tab4:
                         "job_type": "PM",
                         "department": pm_dept,
                         "equipment": pm_equip.strip(),
-                        "description": f"[แผน PM: {pm_freq}] {pm_note.strip()}",
+                        "description": pm_note.strip(),
                         "priority": "ปกติ",
                         "status": "รอดำเนินการ",
                         "report_date": str(pm_detected_date),
