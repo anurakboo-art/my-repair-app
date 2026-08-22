@@ -808,9 +808,9 @@ with tab4:
                 st.dataframe(apply_status_style(df_pm_view), use_container_width=True)
 
                 st.markdown("---")
-                st.markdown("#### 🔍 ตรวจสอบสื่อประกอบ (รูปถ่าย / วิดีโอ) **ก่อนทำ PM**")
+                st.markdown("#### 🔍 ตรวจสอบ / จัดการใบบันทึก PM")
                 selected_pm_ticket = st.selectbox(
-                    "เลือกลำดับที่ PM เพื่อดูรูปภาพ/วิดีโอก่อนทำ:", 
+                    "เลือกลำดับที่ PM เพื่อดูรูปภาพหรือยกเลิกรายการ:", 
                     df_pm_show["ticket_no"].tolist(),
                     key="sel_pm_media_b_view"
                 )
@@ -818,6 +818,28 @@ with tab4:
                 if selected_pm_ticket:
                     pm_item = df_pm_show[df_pm_show["ticket_no"] == selected_pm_ticket].iloc[0]
                     display_media_gallery(pm_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM (Before Action)")
+                    
+                    st.markdown("---")
+                    st.markdown("##### 🚨 จัดการสถานะ / ยกเลิกใบบันทึก PM")
+                    
+                    if pm_item["status"] == "ยกเลิก":
+                        st.error(f"❌ ใบบันทึก PM นี้ถูกยกเลิกแล้ว (เหตุผล: {pm_item.get('cause') or 'ไม่ได้ระบุ'})")
+                    else:
+                        with st.popover("🚨 กดยกเลิกใบบันทึก PM นี้", use_container_width=True):
+                            st.warning(f"คุณกำลังจะยกเลิกใบบันทึก PM ลำดับที่: **{selected_pm_ticket}**")
+                            cancel_reason = st.text_input("ระบุเหตุผลที่ยกเลิก (ถ้ามี):", placeholder="เช่น ออกใบงานซ้ำ / เลื่อนการเช็กไปรอบหน้า", key=f"cancel_reason_{pm_item['id']}")
+                            
+                            if st.button("Confirm: ยืนยันยกเลิกใบ PM", type="primary", use_container_width=True, key=f"btn_cancel_{pm_item['id']}"):
+                                update_cancel_payload = {
+                                    "status": "ยกเลิก",
+                                    "cause": cancel_reason.strip() if cancel_reason.strip() else "ยกเลิกจากฟอร์มบันทึก PM"
+                                }
+                                try:
+                                    update_data_in_supabase("pm_tickets", update_cancel_payload, pm_item["id"])
+                                    st.success(f"✅ ยกเลิกใบบันทึก PM ลำดับที่ **{selected_pm_ticket}** สำเร็จแล้ว!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"เกิดข้อผิดพลาดในการยกเลิก: {e}")
 
 # =============================================================
 # TAB 5: บันทึกผล PM & ตรวจสอบหลังทำ (PM Only)
