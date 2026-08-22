@@ -847,40 +847,46 @@ with tab4:
 # =============================================================
 with tab5:
     st.subheader("✅ บันทึกผล PM & ตรวจสอบงานหลังทำ (PM - After Action)")
-    st.caption("บันทึกผลการทำ PM, รูปถ่าย/วิดีโอหลังทำเสร็จ และเปรียบเทียบรูปภาพ ก่อนทำ VS หลังทำ ของงาน PM")
+    st.caption("บันทึกผล/แก้ไขผลการทำ PM, รูปถ่าย/วิดีโอหลังทำเสร็จ และเปรียบเทียบรูปภาพ ก่อนทำ VS หลังทำ ของงาน PM")
 
     st_sub1, st_sub2, st_sub3 = st.tabs([
-        "📝 บันทึกผลการทำ PM (หลังทำ)", 
+        "📝 บันทึกผล / แก้ไขข้อมูล PM (หลังทำ)", 
         "📸 ตรวจสอบสื่อประกอบ (ก่อนทำ VS หลังทำ)",
         "📊 ตารางประวัติงาน PM ทั้งหมด"
     ])
 
-    # Sub-tab 1: บันทึกผลการทำ PM
+    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล
     with st_sub1:
-        st.markdown("#### 🛠️ บันทึกผลการดำเนินงาน PM / ปิดงาน (หลังทำ)")
+        st.markdown("#### 🛠️ บันทึกผล / แก้ไขข้อมูลการดำเนินงาน PM (หลังทำ)")
         
         if df_pm.empty:
             st.info("ยังไม่มีข้อมูลใบงาน PM ในระบบ")
         else:
-            active_pm_tickets = df_pm[df_pm["status"].isin(["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"])]["ticket_no"].tolist()
             all_pm_tickets_list = df_pm["ticket_no"].tolist()
             
             selected_after_ticket = st.selectbox(
-                "เลือกลำดับที่ PM เพื่อบันทึกผลหลังทำ:",
-                options=active_pm_tickets if active_pm_tickets else all_pm_tickets_list,
+                "เลือกลำดับที่ PM เพื่อบันทึกผลหรือแก้ไขข้อมูล:",
+                options=all_pm_tickets_list,
                 key="pm_after_ticket_sel"
             )
             
             if selected_after_ticket:
                 target_item = df_pm[df_pm["ticket_no"] == selected_after_ticket].iloc[0]
                 
-                st.info(f"📌 **ลำดับที่:** {target_item.get('ticket_no')} | **อุปกรณ์:** {target_item.get('equipment')} | **แผนก:** {target_item.get('department')}")
+                status_color = "🟢" if target_item.get("status") == "เสร็จสิ้น" else "🟡"
+                st.info(f"📌 **ลำดับที่:** `{target_item.get('ticket_no')}` | **อุปกรณ์:** {target_item.get('equipment')} | **แผนก:** {target_item.get('department')} | **สถานะปัจจุบัน:** {status_color} {target_item.get('status')}")
                 
                 with st.form("pm_after_form"):
                     col_af1, col_af2 = st.columns(2)
+                    
+                    status_options_pm = ["เสร็จสิ้น", "กำลังดำเนินการ", "รออะไหล่", "รอดำเนินการ"]
+                    curr_pm_status = str(target_item.get("status", "เสร็จสิ้น") or "เสร็จสิ้น")
+                    curr_pm_status_idx = status_options_pm.index(curr_pm_status) if curr_pm_status in status_options_pm else 0
+                    
                     with col_af1:
                         tech_name = st.text_input("ช่างผู้รับผิดชอบ / ผู้ตรวจเช็ก *", value=str(target_item.get("technician", "") or ""))
-                        after_status = st.selectbox("สถานะหลังดำเนินงาน *", ["เสร็จสิ้น", "กำลังดำเนินการ", "รออะไหล่"], index=0, key="pm_status_af")
+                        after_status = st.selectbox("สถานะหลังดำเนินงาน *", status_options_pm, index=curr_pm_status_idx, key="pm_status_af")
+                    
                     with col_af2:
                         now_dt_after = get_thailand_now_dt()
                         init_c_date = parse_date(target_item.get("completed_date"), now_dt_after.date())
@@ -901,18 +907,18 @@ with tab5:
                         qty_after = st.text_area("🔢 จำนวนอะไหล่", value=str(target_item.get("parts_qty", "") or ""), height=100)
                     
                     st.markdown("---")
-                    st.markdown("#### 📸/🎥 อัปโหลดรูปภาพ / วิดีโอ **หลังทำ PM (After Action)**")
+                    st.markdown("#### 📸/🎥 สื่อประกอบหลังทำ PM (After Action)")
                     
                     display_media_gallery(target_item.get("image_after", ""), title="สื่อประกอบหลังทำปัจจุบัน")
                     
                     uploaded_pm_media_after = st.file_uploader(
-                        "📸/🎥 อัปโหลดรูปถ่ายหรือวิดีโอผลงาน (หลังทำ PM)", 
+                        "📸/🎥 เปลี่ยน/อัปโหลดเพิ่ม รูปถ่ายหรือวิดีโอผลงาน (หลังทำ PM)", 
                         type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
                         accept_multiple_files=True,
                         key="pm_media_after_upload"
                     )
                     
-                    btn_save_after = st.form_submit_button("💾 บันทึกผลการทำ PM", use_container_width=True)
+                    btn_save_after = st.form_submit_button("💾 บันทึก / อัปเดตข้อมูลผล PM", use_container_width=True)
                     
                     if btn_save_after:
                         if not tech_name.strip():
@@ -946,7 +952,7 @@ with tab5:
                             
                             try:
                                 update_data_in_supabase("pm_tickets", update_after_data, target_item["id"])
-                                st.success(f"✅ บันทึกผลหลังทำ PM ลำดับที่ **{target_item.get('ticket_no')}** เรียบร้อยแล้ว!")
+                                st.success(f"✅ บันทึก/แก้ไขผลหลังทำ PM ลำดับที่ **{target_item.get('ticket_no')}** เรียบร้อยแล้ว!")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
@@ -959,7 +965,7 @@ with tab5:
             st.info("ยังไม่มีข้อมูลใบงาน PM ในระบบ")
         else:
             compare_ticket_no = st.selectbox(
-                "เลอร์กลำดับที่ PM เพื่อเปรียบเทียบรูปภาพ/วิดีโอ:",
+                "เลือกลำดับที่ PM เพื่อเปรียบเทียบรูปภาพ/วิดีโอ:",
                 df_pm["ticket_no"].tolist(),
                 key="pm_compare_media_sel"
             )
