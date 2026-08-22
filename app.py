@@ -875,7 +875,6 @@ with tab5:
                 
                 status_color = "🟢" if target_item.get("status") == "เสร็จสิ้น" else "🟡"
                 
-                # ดึงวันที่และเวลาที่ตรวจพบ
                 det_date_val = str(target_item.get("report_date", "-") or "-")
                 det_time_val = str(target_item.get("report_time", "") or "")
                 
@@ -1018,7 +1017,7 @@ with tab5:
         if df_pm.empty:
             st.info("ยังไม่มีข้อมูลประวัติงาน PM")
         else:
-            show_cols = ["ticket_no", "report_date", "department", "equipment", "technician", "solution", "completed_date", "status"]
+            show_cols = ["ticket_no", "report_date", "department", "equipment", "detected_symptom", "technician", "solution", "completed_date", "status"]
             df_pm_after_view = df_pm[show_cols].copy()
-            df_pm_after_view.columns = ["ลำดับที่", "วันที่ตรวจพบ", "แผนก", "อุปกรณ์", "ช่างผู้ทำ", "ผลการทำ PM", "วันที่เสร็จ", "สถานะ"]
+            df_pm_after_view.columns = ["ลำดับที่", "วันที่ตรวจพบ", "แผนก", "อุปกรณ์", "อาการที่ตรวจพบ", "ช่างผู้ทำ", "ผลการทำ PM", "วันที่เสร็จ", "สถานะ"]
             st.dataframe(apply_status_style(df_pm_after_view), use_container_width=True)
