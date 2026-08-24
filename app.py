@@ -762,13 +762,9 @@ with tab4:
                 else:
                     pm_dept = pm_dept_choice
             with c_pm_d:
-                pm_equip = st.text_input("อุปกรณ์ / เครื่องจักร *", placeholder="เช่น เครื่องอัดอากาศ No.1")
+                pm_equip = st.text_input("จุดที่ตรวจพบปัญหา *", placeholder="เช่น เครื่องอัดอากาศ No.1 / โครงสร้างโซน A")
             
-            c_pm_prio, c_pm_stat = st.columns(2)
-            with c_pm_prio:
-                pm_priority = st.selectbox("ระดับความเร่งด่วน", ["ปกติ", "ด่วน", "ด่วนที่สุด"], index=0, key="pm_prio_new")
-            with c_pm_stat:
-                pm_status_init = st.selectbox("สถานะเริ่มต้น", ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"], index=0, key="pm_stat_new")
+            pm_priority = st.selectbox("ระดับความเร่งด่วน", ["ปกติ", "ด่วน", "ด่วนที่สุด"], index=0, key="pm_prio_new")
             
             st.markdown("🕒 **วันและเวลาที่ตรวจพบ / วางแผน * **")
             col_pm_dd, col_pm_dt = st.columns(2)
@@ -777,7 +773,7 @@ with tab4:
             with col_pm_dt:
                 pm_detected_time = st.time_input("⏰ เวลาที่ตรวจพบ", value=now_dt_pm.time().replace(microsecond=0), key="pm_det_time")
                 
-            pm_note = st.text_area("รายละเอียดการตรวจเช็ก (Checklist ก่อนทำ) *", placeholder="- เช็กน้ำมันเครื่อง\n- ทำความสะอาดฟิลเตอร์", height=100)
+            pm_note = st.text_area("ปัญหาที่พบ *", placeholder="ระบุรายละเอียดปัญหาที่พบหรือจุดที่ต้องปรับปรุง/ตรวจซ่อม", height=100)
             
             uploaded_pm_media_before = st.file_uploader(
                 "📸/🎥 รูปถ่ายหรือวิดีโอก่อนทำ PM", 
@@ -804,7 +800,7 @@ with tab4:
                         "equipment": pm_equip.strip(),
                         "description": pm_note.strip(),
                         "priority": pm_priority,
-                        "status": pm_status_init,
+                        "status": "รอดำเนินการ",
                         "report_date": str(pm_detected_date),
                         "report_time": pm_detected_time.strftime("%H:%M:%S"),
                         "created_at": created_at_str,
@@ -830,7 +826,7 @@ with tab4:
             else:
                 pm_display_cols = ["ticket_no", "reporter", "report_date", "report_time", "department", "equipment", "description", "priority", "status"]
                 df_pm_view = df_pm_show[pm_display_cols].copy()
-                df_pm_view.columns = ["ลำดับที่", "ผู้บันทึก", "วันที่ตรวจพบ", "เวลาที่ตรวจพบ", "แผนก", "อุปกรณ์/เครื่องจักร", "รายละเอียด PM", "ความเร่งด่วน", "สถานะ"]
+                df_pm_view.columns = ["ลำดับที่", "ผู้บันทึก", "วันที่ตรวจพบ", "เวลาที่ตรวจพบ", "แผนก", "จุดที่ตรวจพบปัญหา", "ปัญหาที่พบ", "ความเร่งด่วน", "สถานะ"]
                 
                 st.dataframe(apply_status_style(df_pm_view), use_container_width=True)
 
@@ -847,7 +843,7 @@ with tab5:
         "📊 ตารางประวัติงาน PM ทั้งหมด"
     ])
 
-    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล (รองรับแก้ไขข้อมูลก่อนทำและลบรายการได้)
+    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล
     with st_sub1:
         st.markdown("#### 🛠️ บันทึกผล / แก้ไขข้อมูลการดำเนินงาน PM")
         
@@ -868,7 +864,7 @@ with tab5:
                 
                 st.info(
                     f"📌 **ลำดับที่:** `{target_item.get('ticket_no')}` | "
-                    f"**อุปกรณ์:** {target_item.get('equipment')} | "
+                    f"**จุดที่ตรวจพบปัญหา:** {target_item.get('equipment')} | "
                     f"**แผนก:** {target_item.get('department')} | "
                     f"**สถานะปัจจุบัน:** {status_color} {target_item.get('status')}"
                 )
@@ -881,7 +877,7 @@ with tab5:
                     
                     col_b_e1, col_b_e2 = st.columns(2)
                     with col_b_e1:
-                        b_equip = st.text_input("อุปกรณ์ / เครื่องจักร", value=str(target_item.get("equipment", "") or ""), key=f"tab5_be_eq_{target_item['id']}")
+                        b_equip = st.text_input("จุดที่ตรวจพบปัญหา", value=str(target_item.get("equipment", "") or ""), key=f"tab5_be_eq_{target_item['id']}")
                         b_dept = st.text_input("แผนก / โซน", value=str(target_item.get("department", "") or ""), key=f"tab5_be_dp_{target_item['id']}")
                     
                     with col_b_e2:
@@ -894,7 +890,7 @@ with tab5:
                         with col_det2:
                             det_time_in = st.time_input("⏰ เวลาที่ตรวจพบ", value=init_det_time, key=f"pm_det_t_in_{target_item['id']}")
                     
-                    b_desc = st.text_area("📋 รายละเอียดการตรวจเช็ก (Checklist ก่อนทำ)", value=str(target_item.get("description", "") or ""), height=90, key=f"tab5_be_desc_{target_item['id']}")
+                    b_desc = st.text_area("📋 ปัญหาที่พบ", value=str(target_item.get("description", "") or ""), height=90, key=f"tab5_be_desc_{target_item['id']}")
                     
                     display_media_gallery(target_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM ปัจจุบัน")
                     
@@ -1027,7 +1023,7 @@ with tab5:
             
             if compare_ticket_no:
                 c_item = df_pm[df_pm["ticket_no"] == compare_ticket_no].iloc[0]
-                st.markdown(f"**ลำดับที่:** `{c_item.get('ticket_no')}` | **อุปกรณ์:** {c_item.get('equipment')} | **สถานะ:** {c_item.get('status')}")
+                st.markdown(f"**ลำดับที่:** `{c_item.get('ticket_no')}` | **จุดที่ตรวจพบปัญหา:** {c_item.get('equipment')} | **สถานะ:** {c_item.get('status')}")
                 
                 col_comp1, col_comp2 = st.columns(2)
                 with col_comp1:
@@ -1050,8 +1046,8 @@ with tab5:
             ]
             df_pm_after_view = df_pm[show_cols].copy()
             df_pm_after_view.columns = [
-                "ลำดับที่", "วันที่ตรวจพบ", "แผนก", "อุปกรณ์", 
-                "อาการ/รายละเอียดก่อนทำ PM", "อาการที่ตรวจพบ (ขณะทำ)", "ช่างผู้ทำ", 
+                "ลำดับที่", "วันที่ตรวจพบ", "แผนก", "จุดที่ตรวจพบปัญหา", 
+                "ปัญหาที่พบ", "อาการที่ตรวจพบ (ขณะทำ)", "ช่างผู้ทำ", 
                 "ผลการทำ PM", "วันที่เสร็จ", "สถานะ"
             ]
             st.dataframe(apply_status_style(df_pm_after_view), use_container_width=True)
