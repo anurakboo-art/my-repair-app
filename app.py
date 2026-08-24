@@ -194,7 +194,7 @@ COLUMN_NAMES = [
 ]
 
 # -------------------------------------------------------------
-# Database Loader & CRUD Functions (พร้อมระบบแก้ PGRST204 อัตโนมัติ)
+# Database Loader & CRUD Functions
 # -------------------------------------------------------------
 def load_data_by_table(table_name="repair_tickets", job_type_filter=None):
     if not supabase:
@@ -733,7 +733,7 @@ with tab3:
 # =============================================================
 with tab4:
     st.subheader("📅 แผนงาน PM & บันทึกข้อมูลก่อนทำ (PM - Before Action)")
-    st.caption("ระบบวางแผนการบำรุงรักษาเชิงป้องกัน (PM) บันทึกและแก้ไขข้อมูล/รูปถ่ายก่อนทำ PM ได้สมบูรณ์ทุกรายการ")
+    st.caption("ระบบวางแผนการบำรุงรักษาเชิงป้องกัน (PM) ออกใบงานและบันทึกข้อมูลก่อนทำ PM")
     
     col_pm1, col_pm2 = st.columns([1, 1.2])
     
@@ -818,7 +818,7 @@ with tab4:
                         st.error(f"เกิดข้อผิดพลาดในการบันทึกตาราง 'pm_tickets': {e}")
 
     with col_pm2:
-        st.markdown("#### 📋 รายการงาน PM และจัดการข้อมูลก่อนทำ")
+        st.markdown("#### 📋 รายการงาน PM")
         if df_pm.empty:
             st.info("ยังไม่มีข้อมูลแผนงาน PM ในระบบ")
         else:
@@ -834,117 +834,6 @@ with tab4:
                 
                 st.dataframe(apply_status_style(df_pm_view), use_container_width=True)
 
-                st.markdown("---")
-                st.markdown("#### ✏️ แก้ไขข้อมูลใบบันทึกก่อนทำ PM (Edit Before PM)")
-                selected_pm_ticket = st.selectbox(
-                    "เลือกลำดับที่ PM เพื่อแก้ไขข้อมูลก่อนทำ:", 
-                    df_pm_show["ticket_no"].tolist(),
-                    key="sel_pm_media_b_view"
-                )
-                
-                if selected_pm_ticket:
-                    pm_item = df_pm_show[df_pm_show["ticket_no"] == selected_pm_ticket].iloc[0]
-                    
-                    # ฟอร์มแก้ไขข้อมูลก่อนทำ PM (รองรับแก้ไขทุกฟิลด์)
-                    with st.form(f"edit_pm_before_form_{pm_item['id']}"):
-                        st.markdown(f"**แก้ไขข้อมูลก่อนทำ PM ลำดับที่:** `{pm_item['ticket_no']}`")
-                        
-                        e_pm_col1, e_pm_col2 = st.columns(2)
-                        with e_pm_col1:
-                            edit_pm_no = st.text_input("ลำดับที่ PM", value=str(pm_item.get("ticket_no", "") or ""))
-                            edit_pm_reporter = st.text_input("ผู้ลงบันทึก / ผู้เสนอแผน", value=str(pm_item.get("reporter", "") or "ระบบวางแผน PM"))
-                            edit_pm_equip = st.text_input("อุปกรณ์ / เครื่องจักร", value=str(pm_item.get("equipment", "") or ""))
-                        
-                        curr_pm_dept = str(pm_item.get("department", "") or "")
-                        curr_pm_dept_idx = pm_dept_options.index(curr_pm_dept) if curr_pm_dept in pm_dept_options else len(pm_dept_options) - 1
-                        
-                        with e_pm_col2:
-                            dept_choice_pm_edit = st.selectbox("แผนก / โซน", pm_dept_options, index=curr_pm_dept_idx, key=f"edit_pm_dept_{pm_item['id']}")
-                            if dept_choice_pm_edit == "➕ พิมพ์ระบุแผนกใหม่...":
-                                edit_pm_dept = st.text_input("พิมพ์ชื่อแผนก / โซน ใหม่", value=curr_pm_dept, key=f"edit_pm_dept_new_{pm_item['id']}")
-                            else:
-                                edit_pm_dept = dept_choice_pm_edit
-                            
-                            prio_opts_pm = ["ปกติ", "ด่วน", "ด่วนที่สุด"]
-                            curr_prio_pm = str(pm_item.get("priority", "") or "ปกติ")
-                            prio_idx_pm = prio_opts_pm.index(curr_prio_pm) if curr_prio_pm in prio_opts_pm else 0
-                            edit_pm_prio = st.selectbox("ระดับความเร่งด่วน", prio_opts_pm, index=prio_idx_pm, key=f"edit_pm_prio_{pm_item['id']}")
-                            
-                            stat_opts_pm = ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"]
-                            curr_stat_pm = str(pm_item.get("status", "") or "รอดำเนินการ")
-                            stat_idx_pm = stat_opts_pm.index(curr_stat_pm) if curr_stat_pm in stat_opts_pm else 0
-                            edit_pm_status = st.selectbox("สถานะงาน", stat_opts_pm, index=stat_idx_pm, key=f"edit_pm_stat_{pm_item['id']}")
-                        
-                        st.markdown("🕒 **วันและเวลาที่ตรวจพบ / วางแผน**")
-                        col_ed1, col_et1 = st.columns(2)
-                        
-                        init_pm_det_date = parse_date(pm_item.get("report_date"), now_dt_pm.date())
-                        init_pm_det_time = parse_time(pm_item.get("report_time"), now_dt_pm.time().replace(microsecond=0))
-                        
-                        with col_ed1:
-                            edit_pm_date = st.date_input("📅 วันที่ตรวจพบ", value=init_pm_det_date, key=f"edit_pm_d_{pm_item['id']}")
-                        with col_et1:
-                            edit_pm_time = st.time_input("⏰ เวลาที่ตรวจพบ", value=init_pm_det_time, key=f"edit_pm_t_{pm_item['id']}")
-                        
-                        edit_pm_desc = st.text_area("รายละเอียดการตรวจเช็ก (Checklist ก่อนทำ PM)", value=str(pm_item.get("description", "") or ""), height=100)
-                        
-                        display_media_gallery(pm_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM ปัจจุบัน")
-                        
-                        edit_pm_media_b = st.file_uploader(
-                            "📸/🎥 อัปโหลดเพิ่ม/เปลี่ยน สื่อประกอบก่อนทำ PM",
-                            type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
-                            accept_multiple_files=True,
-                            key=f"edit_pm_media_b_{pm_item['id']}"
-                        )
-                        
-                        btn_update_pm_b = st.form_submit_button("💾 บันทึกการแก้ไขข้อมูลก่อนทำ PM", use_container_width=True)
-                        
-                        if btn_update_pm_b:
-                            if not edit_pm_no.strip() or not edit_pm_equip.strip():
-                                st.error("❌ กรุณากรอกลำดับที่และชื่ออุปกรณ์/เครื่องจักร")
-                            elif not supabase:
-                                st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
-                            else:
-                                pm_media_b64_new = process_media_files(edit_pm_media_b) if edit_pm_media_b else str(pm_item.get("image_before", "") or "")
-                                created_at_str = datetime.combine(edit_pm_date, edit_pm_time).replace(tzinfo=THAILAND_TZ).isoformat()
-                                
-                                update_pm_before_data = {
-                                    "ticket_no": edit_pm_no.strip(),
-                                    "reporter": edit_pm_reporter.strip(),
-                                    "department": edit_pm_dept.strip(),
-                                    "equipment": edit_pm_equip.strip(),
-                                    "priority": edit_pm_prio,
-                                    "status": edit_pm_status,
-                                    "description": edit_pm_desc.strip(),
-                                    "report_date": str(edit_pm_date),
-                                    "report_time": edit_pm_time.strftime("%H:%M:%S"),
-                                    "created_at": created_at_str,
-                                    "image_before": pm_media_b64_new
-                                }
-                                try:
-                                    update_data_in_supabase("pm_tickets", update_pm_before_data, pm_item["id"])
-                                    st.success(f"✅ แก้ไขข้อมูลใบบันทึกก่อนทำ PM **{edit_pm_no}** สำเร็จแล้ว!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"เกิดข้อผิดพลาดในการอัปเดตข้อมูล: {e}")
-                    
-                    st.markdown("---")
-                    st.markdown("##### 🗑️ ยกเลิกและลบใบบันทึก PM")
-                    
-                    with st.popover("🗑️ ยืนยันยกเลิกและลบใบบันทึก PM นี้", use_container_width=True):
-                        st.warning(f"⚠️ รายการลำดับที่ **{selected_pm_ticket}** จะถูกลบออกจากระบบทันทีและไม่สามารถกู้คืนได้")
-                        
-                        if st.button("Confirm: ยืนยันยกเลิกและลบใบ PM นี้ทันที", type="primary", use_container_width=True, key=f"btn_delete_{pm_item['id']}"):
-                            if not supabase:
-                                st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
-                            else:
-                                try:
-                                    delete_data_in_supabase("pm_tickets", pm_item["id"])
-                                    st.success(f"✅ ลบและยกเลิกใบบันทึก PM ลำดับที่ **{selected_pm_ticket}** สำเร็จแล้ว!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"เกิดข้อผิดพลาดในการลบข้อมูล: {e}")
-
 # =============================================================
 # TAB 5: บันทึกผล PM & ตรวจสอบหลังทำ (PM Only)
 # =============================================================
@@ -958,7 +847,7 @@ with tab5:
         "📊 ตารางประวัติงาน PM ทั้งหมด"
     ])
 
-    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล (รองรับแก้ไขข้อมูลก่อนทำด้วย)
+    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล (รองรับแก้ไขข้อมูลก่อนทำและลบรายการได้)
     with st_sub1:
         st.markdown("#### 🛠️ บันทึกผล / แก้ไขข้อมูลการดำเนินงาน PM")
         
@@ -1105,6 +994,23 @@ with tab5:
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"เกิดข้อผิดพลาดในการอัปเดตตาราง 'pm_tickets': {e}")
+                
+                st.markdown("---")
+                st.markdown("##### 🗑️ ยกเลิกและลบใบบันทึก PM")
+                
+                with st.popover("🗑️ ยืนยันยกเลิกและลบใบบันทึก PM นี้", use_container_width=True):
+                    st.warning(f"⚠️ รายการลำดับที่ **{selected_after_ticket}** จะถูกลบออกจากระบบทันทีและไม่สามารถกู้คืนได้")
+                    
+                    if st.button("Confirm: ยืนยันยกเลิกและลบใบ PM นี้ทันที", type="primary", use_container_width=True, key=f"btn_delete_tab5_{target_item['id']}"):
+                        if not supabase:
+                            st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
+                        else:
+                            try:
+                                delete_data_in_supabase("pm_tickets", target_item["id"])
+                                st.success(f"✅ ลบและยกเลิกใบบันทึก PM ลำดับที่ **{selected_after_ticket}** สำเร็จแล้ว!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"เกิดข้อผิดพลาดในการลบข้อมูล: {e}")
 
     # Sub-tab 2: เปรียบเทียบ Before vs After
     with st_sub2:
@@ -1131,7 +1037,7 @@ with tab5:
                     st.markdown("### 🟢 หลังทำ PM (After Action)")
                     display_media_gallery(c_item.get("image_after", ""), title="สื่อประกอบหลังทำ PM")
 
-    # Sub-tab 3: สรุปประวัติงาน PM (เพิ่มคอลัมน์ อาการ/รายละเอียดก่อนทำ PM)
+    # Sub-tab 3: สรุปประวัติงาน PM ทั้งหมด
     with st_sub3:
         st.markdown("#### 📜 ตารางสรุปผลงาน PM ทั้งหมด")
         if df_pm.empty:
