@@ -838,14 +838,14 @@ with tab5:
     st.caption("บันทึก/แก้ไขผลการทำ PM, แก้ไขข้อมูลทั้งก่อนทำและหลังทำ, เปรียบเทียบรูปภาพ ก่อนทำ VS หลังทำ")
 
     st_sub1, st_sub2, st_sub3 = st.tabs([
-        "📝 บันทึกผล / แก้ไขข้อมูล PM (ก่อนทำ & หลังทำ)", 
+        "📝 บันทึกผล ", 
         "📸 ตรวจสอบสื่อประกอบ (ก่อนทำ VS หลังทำ)",
         "📊 ตารางประวัติงาน PM ทั้งหมด"
     ])
 
-    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล
+    # Sub-tab 1: บันทึกผลการทำ PM 
     with st_sub1:
-        st.markdown("#### 🛠️ บันทึกผล / แก้ไขข้อมูลการดำเนินงาน PM")
+        st.markdown("#### 🛠️ บันทึกผล ")
         
         if df_pm.empty:
             st.info("ยังไม่มีข้อมูลใบงาน PM ในระบบ")
@@ -872,8 +872,8 @@ with tab5:
                 now_dt_after = get_thailand_now_dt()
                 
                 with st.form(f"pm_full_edit_form_{target_item['id']}"):
-                    # --- ส่วนที่ 1: แก้ไขข้อมูลก่อนทำ PM (Before Action) ---
-                    st.markdown("### 🔴 1️⃣ แก้ไขข้อมูลก่อนทำ PM (Before Action)")
+                    # --- ส่วนที่ 1: บันทึกข้อมูลก่อนทำ PM (Before Action) ---
+                    st.markdown("### 🔴 1️⃣ บึนทักข้อมูลก่อนทำ PM (Before Action)")
                     
                     col_b_e1, col_b_e2 = st.columns(2)
                     with col_b_e1:
@@ -901,9 +901,9 @@ with tab5:
                         key=f"tab5_pm_media_b_upload_{target_item['id']}"
                     )
                     
-                    # --- ส่วนที่ 2: บันทึก/แก้ไข ผลการทำ PM (After Action) ---
+                    # --- ส่วนที่ 2: บันทึกผลการทำ PM (After Action) ---
                     st.markdown("---")
-                    st.markdown("### 🟢 2️⃣ บันทึก/แก้ไข ผลการดำเนินงาน PM (After Action)")
+                    st.markdown("### 🟢 2️⃣ บันทึกผลการดำเนินงาน PM (After Action)")
                     
                     col_af1, col_af2 = st.columns(2)
                     
