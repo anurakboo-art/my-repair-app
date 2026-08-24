@@ -5,6 +5,7 @@ from PIL import Image
 import io
 import base64
 import json
+import re
 import plotly.express as px
 from supabase import create_client
 
@@ -193,7 +194,7 @@ COLUMN_NAMES = [
 ]
 
 # -------------------------------------------------------------
-# Database Loader & CRUD Functions (รองรับคอลัมน์ยืดหยุ่น)
+# Database Loader & CRUD Functions (พร้อมระบบแก้ PGRST204 อัตโนมัติ)
 # -------------------------------------------------------------
 def load_data_by_table(table_name="repair_tickets", job_type_filter=None):
     if not supabase:
@@ -217,20 +218,36 @@ def load_data_by_table(table_name="repair_tickets", job_type_filter=None):
         return pd.DataFrame(columns=COLUMN_NAMES)
 
 def save_data_to_supabase(primary_table, data):
-    # กรองเฉพาะ key ที่มีอยู่จริงในคอลัมน์ฐานข้อมูลเพื่อป้องกัน Schema Error
-    res = supabase.table(primary_table).select("*").limit(1).execute()
-    if res.data and len(res.data) > 0:
-        valid_cols = set(res.data[0].keys())
-        data = {k: v for k, v in data.items() if k in valid_cols}
-    return supabase.table(primary_table).insert(data).execute()
+    try:
+        res = supabase.table(primary_table).select("*").limit(1).execute()
+        if res.data and len(res.data) > 0:
+            valid_cols = set(res.data[0].keys())
+            data = {k: v for k, v in data.items() if k in valid_cols}
+        return supabase.table(primary_table).insert(data).execute()
+    except Exception as e:
+        err_msg = str(e)
+        match = re.search(r"Could not find the '([^']+)' column", err_msg)
+        if match:
+            missing_col = match.group(1)
+            data.pop(missing_col, None)
+            return save_data_to_supabase(primary_table, data)
+        raise e
 
 def update_data_in_supabase(primary_table, data, record_id):
-    # กรองเฉพาะ key ที่มีอยู่จริงในคอลัมน์ฐานข้อมูลเพื่อป้องกัน Schema Error
-    res = supabase.table(primary_table).select("*").limit(1).execute()
-    if res.data and len(res.data) > 0:
-        valid_cols = set(res.data[0].keys())
-        data = {k: v for k, v in data.items() if k in valid_cols}
-    return supabase.table(primary_table).update(data).eq("id", record_id).execute()
+    try:
+        res = supabase.table(primary_table).select("*").limit(1).execute()
+        if res.data and len(res.data) > 0:
+            valid_cols = set(res.data[0].keys())
+            data = {k: v for k, v in data.items() if k in valid_cols}
+        return supabase.table(primary_table).update(data).eq("id", record_id).execute()
+    except Exception as e:
+        err_msg = str(e)
+        match = re.search(r"Could not find the '([^']+)' column", err_msg)
+        if match:
+            missing_col = match.group(1)
+            data.pop(missing_col, None)
+            return update_data_in_supabase(primary_table, data, record_id)
+        raise e
 
 def delete_data_in_supabase(primary_table, record_id):
     return supabase.table(primary_table).delete().eq("id", record_id).execute()
@@ -716,33 +733,51 @@ with tab3:
 # =============================================================
 with tab4:
     st.subheader("📅 แผนงาน PM & บันทึกข้อมูลก่อนทำ (PM - Before Action)")
-    st.caption("ระบบวางแผนการบำรุงรักษาเชิงป้องกัน (PM) บันทึกและแก้ไขข้อมูล/รูปถ่ายก่อนทำ PM (แยกจากงานแจ้งซ่อม)")
+    st.caption("ระบบวางแผนการบำรุงรักษาเชิงป้องกัน (PM) บันทึกและแก้ไขข้อมูล/รูปถ่ายก่อนทำ PM ได้สมบูรณ์ทุกรายการ")
     
     col_pm1, col_pm2 = st.columns([1, 1.2])
     
     now_dt_pm = get_thailand_now_dt()
     
+    existing_depts_pm = df_pm["department"].dropna().unique().tolist() if not df_pm.empty else []
+    all_depts_pm = list(dict.fromkeys(DEFAULT_DEPTS + [d for d in existing_depts_pm if d]))
+    pm_dept_options = all_depts_pm + ["➕ พิมพ์ระบุแผนกใหม่..."]
+    
     with col_pm1:
-        st.markdown("#### ➕ วางแผน / ออกใบงาน PM ใหม่")
+        st.markdown("#### ➕ วางแผน / ออกใบงาน PM ใหม่ (ก่อนทำ)")
         default_pm_no = generate_ticket_no(df_pm, prefix="PM-")
         
         with st.form("add_pm_plan_form", clear_on_submit=True):
-            pm_no = st.text_input("ลำดับที่ PM *", value=default_pm_no)
-            pm_equip = st.text_input("อุปกรณ์ / เครื่องจักร *", placeholder="เช่น เครื่องอัดอากาศ No.1")
+            c_pm_a, c_pm_b = st.columns(2)
+            with c_pm_a:
+                pm_no = st.text_input("ลำดับที่ PM *", value=default_pm_no)
+            with c_pm_b:
+                pm_reporter = st.text_input("ผู้ลงบันทึก / ผู้เสนอแผน *", value="ระบบวางแผน PM")
             
-            existing_depts_pm = df_pm["department"].dropna().unique().tolist() if not df_pm.empty else []
-            all_depts_pm = list(dict.fromkeys(DEFAULT_DEPTS + [d for d in existing_depts_pm if d]))
+            c_pm_c, c_pm_d = st.columns(2)
+            with c_pm_c:
+                pm_dept_choice = st.selectbox("แผนก / โซน *", pm_dept_options, key="pm_dept_sel")
+                if pm_dept_choice == "➕ พิมพ์ระบุแผนกใหม่...":
+                    pm_dept = st.text_input("พิมพ์ชื่อแผนก / โซน ใหม่ *", key="pm_new_dept")
+                else:
+                    pm_dept = pm_dept_choice
+            with c_pm_d:
+                pm_equip = st.text_input("อุปกรณ์ / เครื่องจักร *", placeholder="เช่น เครื่องอัดอากาศ No.1")
             
-            pm_dept = st.selectbox("แผนก / โซน *", all_depts_pm, key="pm_dept_sel")
+            c_pm_prio, c_pm_stat = st.columns(2)
+            with c_pm_prio:
+                pm_priority = st.selectbox("ระดับความเร่งด่วน", ["ปกติ", "ด่วน", "ด่วนที่สุด"], index=0, key="pm_prio_new")
+            with c_pm_stat:
+                pm_status_init = st.selectbox("สถานะเริ่มต้น", ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"], index=0, key="pm_stat_new")
             
-            st.markdown("🕒 **วันและเวลาที่ตรวจพบ * **")
+            st.markdown("🕒 **วันและเวลาที่ตรวจพบ / วางแผน * **")
             col_pm_dd, col_pm_dt = st.columns(2)
             with col_pm_dd:
                 pm_detected_date = st.date_input("📅 วันที่ตรวจพบ", value=now_dt_pm.date(), key="pm_det_date")
             with col_pm_dt:
                 pm_detected_time = st.time_input("⏰ เวลาที่ตรวจพบ", value=now_dt_pm.time().replace(microsecond=0), key="pm_det_time")
                 
-            pm_note = st.text_area("รายละเอียดการตรวจเช็ก (Checklist)", placeholder="- เช็กน้ำมันเครื่อง\n- ทำความสะอาดฟิลเตอร์")
+            pm_note = st.text_area("รายละเอียดการตรวจเช็ก (Checklist ก่อนทำ) *", placeholder="- เช็กน้ำมันเครื่อง\n- ทำความสะอาดฟิลเตอร์", height=100)
             
             uploaded_pm_media_before = st.file_uploader(
                 "📸/🎥 รูปถ่ายหรือวิดีโอก่อนทำ PM", 
@@ -753,8 +788,8 @@ with tab4:
             
             btn_save_pm = st.form_submit_button("💾 บันทึกแผน PM (ก่อนทำ)", use_container_width=True)
             if btn_save_pm:
-                if not pm_equip.strip() or not pm_no.strip():
-                    st.error("❌ กรุณาระบุลำดับที่และชื่ออุปกรณ์/เครื่องจักร")
+                if not pm_equip.strip() or not pm_no.strip() or not pm_dept.strip() or not pm_note.strip():
+                    st.error("❌ กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบถ้วน")
                 elif not supabase:
                     st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
                 else:
@@ -763,13 +798,13 @@ with tab4:
                     
                     new_pm_data = {
                         "ticket_no": pm_no.strip(),
-                        "reporter": "ระบบวางแผน PM",
+                        "reporter": pm_reporter.strip(),
                         "job_type": "PM",
-                        "department": pm_dept,
+                        "department": pm_dept.strip(),
                         "equipment": pm_equip.strip(),
                         "description": pm_note.strip(),
-                        "priority": "ปกติ",
-                        "status": "รอดำเนินการ",
+                        "priority": pm_priority,
+                        "status": pm_status_init,
                         "report_date": str(pm_detected_date),
                         "report_time": pm_detected_time.strftime("%H:%M:%S"),
                         "created_at": created_at_str,
@@ -783,26 +818,26 @@ with tab4:
                         st.error(f"เกิดข้อผิดพลาดในการบันทึกตาราง 'pm_tickets': {e}")
 
     with col_pm2:
-        st.markdown("#### 📋 รายการงาน PM และจัดการข้อมูล (ก่อนทำ)")
+        st.markdown("#### 📋 รายการงาน PM และจัดการข้อมูลก่อนทำ")
         if df_pm.empty:
             st.info("ยังไม่มีข้อมูลแผนงาน PM ในระบบ")
         else:
-            pm_status_filter = st.multiselect("กรองสถานะ PM", ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น"], default=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"], key="pm_status_f")
+            pm_status_filter = st.multiselect("กรองสถานะ PM", ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"], default=["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่"], key="pm_status_f")
             df_pm_show = df_pm[df_pm["status"].isin(pm_status_filter)]
             
             if df_pm_show.empty:
                 st.warning("ไม่พบรายการ PM ตามสถานะที่กรอง")
             else:
-                pm_display_cols = ["ticket_no", "report_date", "report_time", "department", "equipment", "description", "status"]
+                pm_display_cols = ["ticket_no", "reporter", "report_date", "report_time", "department", "equipment", "description", "priority", "status"]
                 df_pm_view = df_pm_show[pm_display_cols].copy()
-                df_pm_view.columns = ["ลำดับที่", "วันที่ตรวจพบ", "เวลาที่ตรวจพบ", "แผนก", "อุปกรณ์/เครื่องจักร", "รายละเอียด PM", "สถานะ"]
+                df_pm_view.columns = ["ลำดับที่", "ผู้บันทึก", "วันที่ตรวจพบ", "เวลาที่ตรวจพบ", "แผนก", "อุปกรณ์/เครื่องจักร", "รายละเอียด PM", "ความเร่งด่วน", "สถานะ"]
                 
                 st.dataframe(apply_status_style(df_pm_view), use_container_width=True)
 
                 st.markdown("---")
-                st.markdown("#### ✏️ แก้ไขข้อมูล / ดูสื่อประกอบก่อนทำ PM")
+                st.markdown("#### ✏️ แก้ไขข้อมูลใบบันทึกก่อนทำ PM (Edit Before PM)")
                 selected_pm_ticket = st.selectbox(
-                    "เลือกลำดับที่ PM เพื่อดูหรือแก้ไข:", 
+                    "เลือกลำดับที่ PM เพื่อแก้ไขข้อมูลก่อนทำ:", 
                     df_pm_show["ticket_no"].tolist(),
                     key="sel_pm_media_b_view"
                 )
@@ -810,31 +845,48 @@ with tab4:
                 if selected_pm_ticket:
                     pm_item = df_pm_show[df_pm_show["ticket_no"] == selected_pm_ticket].iloc[0]
                     
-                    # ฟอร์มแก้ไขข้อมูลก่อนทำ PM
+                    # ฟอร์มแก้ไขข้อมูลก่อนทำ PM (รองรับแก้ไขทุกฟิลด์)
                     with st.form(f"edit_pm_before_form_{pm_item['id']}"):
-                        st.markdown(f"**แก้ไขข้อมูลใบบันทึกก่อนทำ PM:** `{pm_item['ticket_no']}`")
+                        st.markdown(f"**แก้ไขข้อมูลก่อนทำ PM ลำดับที่:** `{pm_item['ticket_no']}`")
                         
                         e_pm_col1, e_pm_col2 = st.columns(2)
                         with e_pm_col1:
                             edit_pm_no = st.text_input("ลำดับที่ PM", value=str(pm_item.get("ticket_no", "") or ""))
+                            edit_pm_reporter = st.text_input("ผู้ลงบันทึก / ผู้เสนอแผน", value=str(pm_item.get("reporter", "") or "ระบบวางแผน PM"))
                             edit_pm_equip = st.text_input("อุปกรณ์ / เครื่องจักร", value=str(pm_item.get("equipment", "") or ""))
                         
                         curr_pm_dept = str(pm_item.get("department", "") or "")
-                        curr_pm_dept_idx = all_depts_pm.index(curr_pm_dept) if curr_pm_dept in all_depts_pm else 0
-                        with e_pm_col2:
-                            edit_pm_dept = st.selectbox("แผนก / โซน", all_depts_pm, index=curr_pm_dept_idx, key=f"edit_pm_dept_{pm_item['id']}")
-                            
-                            init_pm_det_date = parse_date(pm_item.get("report_date"), now_dt_pm.date())
-                            init_pm_det_time = parse_time(pm_item.get("report_time"), now_dt_pm.time().replace(microsecond=0))
-                            
-                            st.markdown("🕒 **วันและเวลาที่ตรวจพบ**")
-                            col_ed1, col_et1 = st.columns(2)
-                            with col_ed1:
-                                edit_pm_date = st.date_input("วันที่", value=init_pm_det_date, key=f"edit_pm_d_{pm_item['id']}")
-                            with col_et1:
-                                edit_pm_time = st.time_input("เวลา", value=init_pm_det_time, key=f"edit_pm_t_{pm_item['id']}")
+                        curr_pm_dept_idx = pm_dept_options.index(curr_pm_dept) if curr_pm_dept in pm_dept_options else len(pm_dept_options) - 1
                         
-                        edit_pm_desc = st.text_area("รายละเอียดการตรวจเช็ก (Checklist)", value=str(pm_item.get("description", "") or ""), height=100)
+                        with e_pm_col2:
+                            dept_choice_pm_edit = st.selectbox("แผนก / โซน", pm_dept_options, index=curr_pm_dept_idx, key=f"edit_pm_dept_{pm_item['id']}")
+                            if dept_choice_pm_edit == "➕ พิมพ์ระบุแผนกใหม่...":
+                                edit_pm_dept = st.text_input("พิมพ์ชื่อแผนก / โซน ใหม่", value=curr_pm_dept, key=f"edit_pm_dept_new_{pm_item['id']}")
+                            else:
+                                edit_pm_dept = dept_choice_pm_edit
+                            
+                            prio_opts_pm = ["ปกติ", "ด่วน", "ด่วนที่สุด"]
+                            curr_prio_pm = str(pm_item.get("priority", "") or "ปกติ")
+                            prio_idx_pm = prio_opts_pm.index(curr_prio_pm) if curr_prio_pm in prio_opts_pm else 0
+                            edit_pm_prio = st.selectbox("ระดับความเร่งด่วน", prio_opts_pm, index=prio_idx_pm, key=f"edit_pm_prio_{pm_item['id']}")
+                            
+                            stat_opts_pm = ["รอดำเนินการ", "กำลังดำเนินการ", "รออะไหล่", "เสร็จสิ้น", "ยกเลิก"]
+                            curr_stat_pm = str(pm_item.get("status", "") or "รอดำเนินการ")
+                            stat_idx_pm = stat_opts_pm.index(curr_stat_pm) if curr_stat_pm in stat_opts_pm else 0
+                            edit_pm_status = st.selectbox("สถานะงาน", stat_opts_pm, index=stat_idx_pm, key=f"edit_pm_stat_{pm_item['id']}")
+                        
+                        st.markdown("🕒 **วันและเวลาที่ตรวจพบ / วางแผน**")
+                        col_ed1, col_et1 = st.columns(2)
+                        
+                        init_pm_det_date = parse_date(pm_item.get("report_date"), now_dt_pm.date())
+                        init_pm_det_time = parse_time(pm_item.get("report_time"), now_dt_pm.time().replace(microsecond=0))
+                        
+                        with col_ed1:
+                            edit_pm_date = st.date_input("📅 วันที่ตรวจพบ", value=init_pm_det_date, key=f"edit_pm_d_{pm_item['id']}")
+                        with col_et1:
+                            edit_pm_time = st.time_input("⏰ เวลาที่ตรวจพบ", value=init_pm_det_time, key=f"edit_pm_t_{pm_item['id']}")
+                        
+                        edit_pm_desc = st.text_area("รายละเอียดการตรวจเช็ก (Checklist ก่อนทำ PM)", value=str(pm_item.get("description", "") or ""), height=100)
                         
                         display_media_gallery(pm_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM ปัจจุบัน")
                         
@@ -845,7 +897,7 @@ with tab4:
                             key=f"edit_pm_media_b_{pm_item['id']}"
                         )
                         
-                        btn_update_pm_b = st.form_submit_button("💾 บันทึกการแก้ไขก่อนทำ PM", use_container_width=True)
+                        btn_update_pm_b = st.form_submit_button("💾 บันทึกการแก้ไขข้อมูลก่อนทำ PM", use_container_width=True)
                         
                         if btn_update_pm_b:
                             if not edit_pm_no.strip() or not edit_pm_equip.strip():
@@ -858,8 +910,11 @@ with tab4:
                                 
                                 update_pm_before_data = {
                                     "ticket_no": edit_pm_no.strip(),
-                                    "department": edit_pm_dept,
+                                    "reporter": edit_pm_reporter.strip(),
+                                    "department": edit_pm_dept.strip(),
                                     "equipment": edit_pm_equip.strip(),
+                                    "priority": edit_pm_prio,
+                                    "status": edit_pm_status,
                                     "description": edit_pm_desc.strip(),
                                     "report_date": str(edit_pm_date),
                                     "report_time": edit_pm_time.strftime("%H:%M:%S"),
@@ -895,15 +950,15 @@ with tab4:
 # =============================================================
 with tab5:
     st.subheader("✅ บันทึกผล PM & ตรวจสอบงานหลังทำ (PM - After Action)")
-    st.caption("บันทึกผล/แก้ไขผลการทำ PM, รูปถ่าย/วิดีโอหลังทำเสร็จ และเปรียบเทียบรูปภาพ ก่อนทำ VS หลังทำ ของงาน PM")
+    st.caption("บันทึก/แก้ไขผลการทำ PM, แก้ไขข้อมูลทั้งก่อนทำและหลังทำ, เปรียบเทียบรูปภาพ ก่อนทำ VS หลังทำ")
 
     st_sub1, st_sub2, st_sub3 = st.tabs([
-        "📝 บันทึกผล / แก้ไขข้อมูล PM (หลังทำ)", 
+        "📝 บันทึกผล / แก้ไขข้อมูล PM (ก่อนทำ & หลังทำ)", 
         "📸 ตรวจสอบสื่อประกอบ (ก่อนทำ VS หลังทำ)",
         "📊 ตารางประวัติงาน PM ทั้งหมด"
     ])
 
-    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล
+    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล (รองรับแก้ไขข้อมูลก่อนทำด้วย)
     with st_sub1:
         st.markdown("#### 🛠️ บันทึกผล / แก้ไขข้อมูลการดำเนินงาน PM")
         
@@ -920,11 +975,7 @@ with tab5:
             
             if selected_after_ticket:
                 target_item = df_pm[df_pm["ticket_no"] == selected_after_ticket].iloc[0]
-                
                 status_color = "🟢" if target_item.get("status") == "เสร็จสิ้น" else "🟡"
-                
-                det_date_val = str(target_item.get("report_date", "-") or "-")
-                det_time_val = str(target_item.get("report_time", "") or "")
                 
                 st.info(
                     f"📌 **ลำดับที่:** `{target_item.get('ticket_no')}` | "
@@ -933,37 +984,41 @@ with tab5:
                     f"**สถานะปัจจุบัน:** {status_color} {target_item.get('status')}"
                 )
                 
-                # --- ส่วนแสดงข้อมูลก่อนทำ PM (Before Action) ---
-                st.markdown("---")
-                st.markdown("### 🔴 1️⃣ ข้อมูลก่อนทำ PM (Before Action)")
-                col_b1, col_b2 = st.columns([1, 1])
-                with col_b1:
-                    st.markdown(f"**📅 วันที่ตรวจพบ:** {det_date_val} | **⏰ เวลาที่ตรวจพบ:** {det_time_val}")
-                    desc_text = target_item.get("description", "") or "ไม่มีการระบุรายละเอียด"
-                    st.markdown("**📋 รายละเอียดการตรวจเช็ก (Checklist):**")
-                    st.code(desc_text)
-                with col_b2:
-                    display_media_gallery(target_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM (Before)")
-                
-                # --- ส่วนฟอร์มบันทึกผลหลังทำ PM (After Action) ---
-                st.markdown("---")
-                st.markdown("### 🟢 2️⃣ บันทึก/แก้ไข ผลการดำเนินงาน PM (After Action)")
-                
                 now_dt_after = get_thailand_now_dt()
                 
-                with st.form(f"pm_after_form_{target_item['id']}"):
-                    st.markdown("🕒 **แก้ไขวัน-เวลาการตรวจพบ (หากต้องการ)**")
+                with st.form(f"pm_full_edit_form_{target_item['id']}"):
+                    # --- ส่วนที่ 1: แก้ไขข้อมูลก่อนทำ PM (Before Action) ---
+                    st.markdown("### 🔴 1️⃣ แก้ไขข้อมูลก่อนทำ PM (Before Action)")
                     
-                    col_det1, col_det2 = st.columns(2)
-                    init_det_date = parse_date(target_item.get("report_date"), now_dt_after.date())
-                    init_det_time = parse_time(target_item.get("report_time"), now_dt_after.time().replace(microsecond=0))
+                    col_b_e1, col_b_e2 = st.columns(2)
+                    with col_b_e1:
+                        b_equip = st.text_input("อุปกรณ์ / เครื่องจักร", value=str(target_item.get("equipment", "") or ""), key=f"tab5_be_eq_{target_item['id']}")
+                        b_dept = st.text_input("แผนก / โซน", value=str(target_item.get("department", "") or ""), key=f"tab5_be_dp_{target_item['id']}")
                     
-                    with col_det1:
-                        det_date_in = st.date_input("📅 วันที่ตรวจพบ", value=init_det_date, key=f"pm_det_d_in_{target_item['id']}")
-                    with col_det2:
-                        det_time_in = st.time_input("⏰ เวลาที่ตรวจพบ", value=init_det_time, key=f"pm_det_t_in_{target_item['id']}")
+                    with col_b_e2:
+                        init_det_date = parse_date(target_item.get("report_date"), now_dt_after.date())
+                        init_det_time = parse_time(target_item.get("report_time"), now_dt_after.time().replace(microsecond=0))
                         
+                        col_det1, col_det2 = st.columns(2)
+                        with col_det1:
+                            det_date_in = st.date_input("📅 วันที่ตรวจพบ", value=init_det_date, key=f"pm_det_d_in_{target_item['id']}")
+                        with col_det2:
+                            det_time_in = st.time_input("⏰ เวลาที่ตรวจพบ", value=init_det_time, key=f"pm_det_t_in_{target_item['id']}")
+                    
+                    b_desc = st.text_area("📋 รายละเอียดการตรวจเช็ก (Checklist ก่อนทำ)", value=str(target_item.get("description", "") or ""), height=90, key=f"tab5_be_desc_{target_item['id']}")
+                    
+                    display_media_gallery(target_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM ปัจจุบัน")
+                    
+                    uploaded_pm_media_before_tab5 = st.file_uploader(
+                        "📸/🎥 อัปโหลดเปลี่ยน/เพิ่ม สื่อประกอบก่อนทำ PM (Before)", 
+                        type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
+                        accept_multiple_files=True,
+                        key=f"tab5_pm_media_b_upload_{target_item['id']}"
+                    )
+                    
+                    # --- ส่วนที่ 2: บันทึก/แก้ไข ผลการทำ PM (After Action) ---
                     st.markdown("---")
+                    st.markdown("### 🟢 2️⃣ บันทึก/แก้ไข ผลการดำเนินงาน PM (After Action)")
                     
                     col_af1, col_af2 = st.columns(2)
                     
@@ -972,7 +1027,7 @@ with tab5:
                     curr_pm_status_idx = status_options_pm.index(curr_pm_status) if curr_pm_status in status_options_pm else 0
                     
                     with col_af1:
-                        tech_name = st.text_input("ช่างผู้รับผิดชอบ / ผู้ตรวจเช็ก *", value=str(target_item.get("technician", "") or ""))
+                        tech_name = st.text_input("ช่างผู้รับผิดชอบ / ผู้ตรวจเช็ก *", value=str(target_item.get("technician", "") or ""), key=f"tab5_tech_{target_item['id']}")
                         after_status = st.selectbox("สถานะหลังดำเนินงาน *", status_options_pm, index=curr_pm_status_idx, key=f"pm_status_af_{target_item['id']}")
                     
                     with col_af2:
@@ -987,16 +1042,13 @@ with tab5:
                             
                     col_af3, col_af4 = st.columns(2)
                     with col_af3:
-                        symptom_after = st.text_area("🔍 อาการที่ตรวจพบ / สภาพการทำงาน", value=str(target_item.get("detected_symptom", "") or ""), height=100)
-                        solution_after = st.text_area("🛠️ ผลการทำ PM / วิธีการแก้ไข (หลังทำ) *", value=str(target_item.get("solution", "") or ""), height=100)
+                        symptom_after = st.text_area("🔍 อาการที่ตรวจพบ / สภาพการทำงาน", value=str(target_item.get("detected_symptom", "") or ""), height=100, key=f"tab5_sym_{target_item['id']}")
+                        solution_after = st.text_area("🛠️ ผลการทำ PM / วิธีการแก้ไข (หลังทำ) *", value=str(target_item.get("solution", "") or ""), height=100, key=f"tab5_sol_{target_item['id']}")
                     with col_af4:
-                        parts_after = st.text_area("🧩 อะไหล่/วัสดุอุปกรณ์ที่ใช้", value=str(target_item.get("parts_used", "") or ""), height=100)
-                        qty_after = st.text_area("🔢 จำนวนอะไหล่", value=str(target_item.get("parts_qty", "") or ""), height=100)
+                        parts_after = st.text_area("🧩 อะไหล่/วัสดุอุปกรณ์ที่ใช้", value=str(target_item.get("parts_used", "") or ""), height=100, key=f"tab5_pu_{target_item['id']}")
+                        qty_after = st.text_area("🔢 จำนวนอะไหล่", value=str(target_item.get("parts_qty", "") or ""), height=100, key=f"tab5_pq_{target_item['id']}")
                     
-                    st.markdown("---")
-                    st.markdown("#### 📸/🎥 สื่อประกอบหลังทำ PM (After Action)")
-                    
-                    display_media_gallery(target_item.get("image_after", ""), title="สื่อประกอบหลังทำปัจจุบัน")
+                    display_media_gallery(target_item.get("image_after", ""), title="📸/🎥 สื่อประกอบหลังทำ PM ปัจจุบัน")
                     
                     uploaded_pm_media_after = st.file_uploader(
                         "📸/🎥 เปลี่ยน/อัปโหลดเพิ่ม รูปถ่ายหรือวิดีโอผลงาน (หลังทำ PM)", 
@@ -1005,14 +1057,15 @@ with tab5:
                         key=f"pm_media_after_upload_{target_item['id']}"
                     )
                     
-                    btn_save_after = st.form_submit_button("💾 บันทึก / อัปเดตข้อมูลผล PM", use_container_width=True)
+                    btn_save_full_pm = st.form_submit_button("💾 บันทึกการอัปเดตข้อมูล PM (ทั้งก่อนทำ และ หลังทำ)", use_container_width=True)
                     
-                    if btn_save_after:
+                    if btn_save_full_pm:
                         if not tech_name.strip():
                             st.error("❌ กรุณาระบุชื่อช่างผู้รับผิดชอบ")
                         elif not supabase:
                             st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
                         else:
+                            media_before_b64 = process_media_files(uploaded_pm_media_before_tab5) if uploaded_pm_media_before_tab5 else str(target_item.get("image_before", "") or "")
                             media_after_b64 = process_media_files(uploaded_pm_media_after) if uploaded_pm_media_after else str(target_item.get("image_after", "") or "")
                                 
                             c_at_str = None
@@ -1026,10 +1079,14 @@ with tab5:
                                 
                             created_at_str = datetime.combine(det_date_in, det_time_in).replace(tzinfo=THAILAND_TZ).isoformat()
 
-                            update_after_data = {
+                            update_full_data = {
+                                "equipment": b_equip.strip(),
+                                "department": b_dept.strip(),
+                                "description": b_desc.strip(),
                                 "report_date": str(det_date_in),
                                 "report_time": det_time_in.strftime("%H:%M:%S"),
                                 "created_at": created_at_str,
+                                "image_before": media_before_b64,
                                 "technician": tech_name.strip(),
                                 "status": after_status,
                                 "detected_symptom": symptom_after,
@@ -1043,8 +1100,8 @@ with tab5:
                             }
                             
                             try:
-                                update_data_in_supabase("pm_tickets", update_after_data, target_item["id"])
-                                st.success(f"✅ บันทึก/แก้ไขผลหลังทำ PM ลำดับที่ **{target_item.get('ticket_no')}** เรียบร้อยแล้ว!")
+                                update_data_in_supabase("pm_tickets", update_full_data, target_item["id"])
+                                st.success(f"✅ บันทึก/แก้ไขข้อมูล PM ลำดับที่ **{target_item.get('ticket_no')}** เรียบร้อยแล้ว!")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"เกิดข้อผิดพลาดในการอัปเดตตาราง 'pm_tickets': {e}")
