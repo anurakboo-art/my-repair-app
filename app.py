@@ -193,9 +193,9 @@ COLUMN_NAMES = [
 ]
 
 # -------------------------------------------------------------
-# Database Loader & CRUD Functions
+# Database Loader & CRUD Functions (แก้ไขเรื่อง Fallback ตาราง)
 # -------------------------------------------------------------
-def load_data_by_table(table_name="tickets", job_type_filter=None):
+def load_data_by_table(table_name="repair_tickets", job_type_filter=None):
     if not supabase:
         return pd.DataFrame(columns=COLUMN_NAMES)
     try:
@@ -212,42 +212,18 @@ def load_data_by_table(table_name="tickets", job_type_filter=None):
         df["sort_dt"] = pd.to_datetime(df["report_date"].astype(str) + " " + df["report_time"].astype(str).fillna("00:00:00"), errors='coerce')
         df = df.sort_values(by=["sort_dt", "created_at"], ascending=[True, True]).drop(columns=["sort_dt"])
         return df
-    except Exception:
-        try:
-            res = supabase.table("tickets").select("*").execute()
-            df = pd.DataFrame(res.data)
-            if df.empty:
-                return pd.DataFrame(columns=COLUMN_NAMES)
-            for c in COLUMN_NAMES:
-                if c not in df.columns:
-                    df[c] = ""
-            if job_type_filter:
-                df = df[df["job_type"] == job_type_filter]
-            
-            df["sort_dt"] = pd.to_datetime(df["report_date"].astype(str) + " " + df["report_time"].astype(str).fillna("00:00:00"), errors='coerce')
-            df = df.sort_values(by=["sort_dt", "created_at"], ascending=[True, True]).drop(columns=["sort_dt"])
-            return df
-        except Exception as e:
-            st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูล: {e}")
-            return pd.DataFrame(columns=COLUMN_NAMES)
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูลตาราง '{table_name}': {e}")
+        return pd.DataFrame(columns=COLUMN_NAMES)
 
 def save_data_to_supabase(primary_table, data):
-    try:
-        return supabase.table(primary_table).insert(data).execute()
-    except Exception:
-        return supabase.table("tickets").insert(data).execute()
+    return supabase.table(primary_table).insert(data).execute()
 
 def update_data_in_supabase(primary_table, data, record_id):
-    try:
-        return supabase.table(primary_table).update(data).eq("id", record_id).execute()
-    except Exception:
-        return supabase.table("tickets").update(data).eq("id", record_id).execute()
+    return supabase.table(primary_table).update(data).eq("id", record_id).execute()
 
 def delete_data_in_supabase(primary_table, record_id):
-    try:
-        return supabase.table(primary_table).delete().eq("id", record_id).execute()
-    except Exception:
-        return supabase.table("tickets").delete().eq("id", record_id).execute()
+    return supabase.table(primary_table).delete().eq("id", record_id).execute()
 
 def generate_ticket_no(df, prefix="REP-"):
     now = get_thailand_now_dt()
@@ -290,7 +266,7 @@ def generate_default_received_no(df):
     return f"{prefix}{max_num + 1:03d}"
 
 # -------------------------------------------------------------
-# โหลดข้อมูลแยกส่วน
+# โหลดข้อมูลแยกตาราง
 # -------------------------------------------------------------
 df_repair = load_data_by_table("repair_tickets", job_type_filter="แจ้งซ่อม")
 df_pm = load_data_by_table("pm_tickets", job_type_filter="PM")
@@ -613,7 +589,7 @@ with tab2:
                             st.success(f"✅ อัปเดตข้อมูลลำดับที่ **{ticket_no_edit}** เรียบร้อยแล้ว!")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"เกิดข้อผิดพลาดในการอัปเดต: {e}")
+                            st.error(f"เกิดข้อผิดพลาดในการอัปเดตตาราง 'repair_tickets': {e}")
 
 # =============================================================
 # TAB 3: รายงาน & สถิติรวม
@@ -794,7 +770,7 @@ with tab4:
                         st.success(f"✅ บันทึกแผน PM เรียบร้อย! ออกลำดับที่: **{pm_no}**")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
+                        st.error(f"เกิดข้อผิดพลาดในการบันทึกตาราง 'pm_tickets': {e}")
 
     with col_pm2:
         st.markdown("#### 📋 รายการงาน PM และสื่อประกอบก่อนทำ")
@@ -855,7 +831,7 @@ with tab5:
         "📊 ตารางประวัติงาน PM ทั้งหมด"
     ])
 
-    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล (ปรับเพิ่มให้แสดงทั้งข้อมูลก่อนทำและหลังทำ)
+    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล (แสดงทั้งข้อมูลก่อนทำและหลังทำ)
     with st_sub1:
         st.markdown("#### 🛠️ บันทึกผล / แก้ไขข้อมูลการดำเนินงาน PM")
         
@@ -892,146 +868,4 @@ with tab5:
                 with col_b1:
                     st.markdown(f"**📅 วันที่ตรวจพบ:** {det_date_val} | **⏰ เวลาที่ตรวจพบ:** {det_time_val}")
                     desc_text = target_item.get("description", "") or "ไม่มีการระบุรายละเอียด"
-                    st.markdown(f"**📋 รายละเอียดการตรวจเช็ก (Checklist):**\n```\n{desc_text}\n```")
-                with col_b2:
-                    display_media_gallery(target_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM (Before)")
-                
-                # --- ส่วนฟอร์มบันทึกผลหลังทำ PM (After Action) ---
-                st.markdown("---")
-                st.markdown("### 🟢 2️⃣ บันทึก/แก้ไข ผลการดำเนินงาน PM (After Action)")
-                
-                now_dt_after = get_thailand_now_dt()
-                
-                with st.form(f"pm_after_form_{target_item['id']}"):
-                    st.markdown("🕒 **แก้ไขวัน-เวลาการตรวจพบ (หากต้องการ)**")
-                    
-                    col_det1, col_det2 = st.columns(2)
-                    init_det_date = parse_date(target_item.get("report_date"), now_dt_after.date())
-                    init_det_time = parse_time(target_item.get("report_time"), now_dt_after.time().replace(microsecond=0))
-                    
-                    with col_det1:
-                        det_date_in = st.date_input("📅 วันที่ตรวจพบ", value=init_det_date, key=f"pm_det_d_in_{target_item['id']}")
-                    with col_det2:
-                        det_time_in = st.time_input("⏰ เวลาที่ตรวจพบ", value=init_det_time, key=f"pm_det_t_in_{target_item['id']}")
-                        
-                    st.markdown("---")
-                    
-                    col_af1, col_af2 = st.columns(2)
-                    
-                    status_options_pm = ["เสร็จสิ้น", "กำลังดำเนินการ", "รออะไหล่", "รอดำเนินการ"]
-                    curr_pm_status = str(target_item.get("status", "เสร็จสิ้น") or "เสร็จสิ้น")
-                    curr_pm_status_idx = status_options_pm.index(curr_pm_status) if curr_pm_status in status_options_pm else 0
-                    
-                    with col_af1:
-                        tech_name = st.text_input("ช่างผู้รับผิดชอบ / ผู้ตรวจเช็ก *", value=str(target_item.get("technician", "") or ""))
-                        after_status = st.selectbox("สถานะหลังดำเนินงาน *", status_options_pm, index=curr_pm_status_idx, key=f"pm_status_af_{target_item['id']}")
-                    
-                    with col_af2:
-                        init_c_date = parse_date(target_item.get("completed_date"), now_dt_after.date())
-                        init_c_time = parse_time(target_item.get("completed_time"), now_dt_after.time().replace(microsecond=0))
-                        
-                        col_cd1, col_ct1 = st.columns(2)
-                        with col_cd1:
-                            comp_date_in = st.date_input("📅 วันที่ทำเสร็จ", value=init_c_date, key=f"pm_cd_in_{target_item['id']}")
-                        with col_ct1:
-                            comp_time_in = st.time_input("⏰ เวลาที่ทำเสร็จ", value=init_c_time, key=f"pm_ct_in_{target_item['id']}")
-                            
-                    col_af3, col_af4 = st.columns(2)
-                    with col_af3:
-                        symptom_after = st.text_area("🔍 อาการที่ตรวจพบ / สภาพการทำงาน", value=str(target_item.get("detected_symptom", "") or ""), height=100)
-                        solution_after = st.text_area("🛠️ ผลการทำ PM / วิธีการแก้ไข (หลังทำ) *", value=str(target_item.get("solution", "") or ""), height=100)
-                    with col_af4:
-                        parts_after = st.text_area("🧩 อะไหล่/วัสดุอุปกรณ์ที่ใช้", value=str(target_item.get("parts_used", "") or ""), height=100)
-                        qty_after = st.text_area("🔢 จำนวนอะไหล่", value=str(target_item.get("parts_qty", "") or ""), height=100)
-                    
-                    st.markdown("---")
-                    st.markdown("#### 📸/🎥 สื่อประกอบหลังทำ PM (After Action)")
-                    
-                    display_media_gallery(target_item.get("image_after", ""), title="สื่อประกอบหลังทำปัจจุบัน")
-                    
-                    uploaded_pm_media_after = st.file_uploader(
-                        "📸/🎥 เปลี่ยน/อัปโหลดเพิ่ม รูปถ่ายหรือวิดีโอผลงาน (หลังทำ PM)", 
-                        type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
-                        accept_multiple_files=True,
-                        key=f"pm_media_after_upload_{target_item['id']}"
-                    )
-                    
-                    btn_save_after = st.form_submit_button("💾 บันทึก / อัปเดตข้อมูลผล PM", use_container_width=True)
-                    
-                    if btn_save_after:
-                        if not tech_name.strip():
-                            st.error("❌ กรุณาระบุชื่อช่างผู้รับผิดชอบ")
-                        elif not supabase:
-                            st.error("❌ ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้")
-                        else:
-                            media_after_b64 = process_media_files(uploaded_pm_media_after) if uploaded_pm_media_after else str(target_item.get("image_after", "") or "")
-                                
-                            c_at_str = None
-                            c_d_str = None
-                            c_t_str = None
-                            
-                            if after_status == "เสร็จสิ้น":
-                                c_d_str = str(comp_date_in)
-                                c_t_str = comp_time_in.strftime("%H:%M:%S")
-                                c_at_str = datetime.combine(comp_date_in, comp_time_in).replace(tzinfo=THAILAND_TZ).isoformat()
-                                
-                            created_at_str = datetime.combine(det_date_in, det_time_in).replace(tzinfo=THAILAND_TZ).isoformat()
-
-                            update_after_data = {
-                                "report_date": str(det_date_in),
-                                "report_time": det_time_in.strftime("%H:%M:%S"),
-                                "created_at": created_at_str,
-                                "technician": tech_name.strip(),
-                                "status": after_status,
-                                "detected_symptom": symptom_after,
-                                "solution": solution_after,
-                                "parts_used": parts_after,
-                                "parts_qty": qty_after,
-                                "completed_date": c_d_str,
-                                "completed_time": c_t_str,
-                                "completed_at": c_at_str,
-                                "image_after": media_after_b64
-                            }
-                            
-                            try:
-                                update_data_in_supabase("pm_tickets", update_after_data, target_item["id"])
-                                st.success(f"✅ บันทึก/แก้ไขผลหลังทำ PM ลำดับที่ **{target_item.get('ticket_no')}** เรียบร้อยแล้ว!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
-
-    # Sub-tab 2: เปรียบเทียบ Before vs After
-    with st_sub2:
-        st.markdown("#### 📸 เปรียบเทียบสื่อประกอบ Before VS After ของงาน PM")
-        
-        if df_pm.empty:
-            st.info("ยังไม่มีข้อมูลใบงาน PM ในระบบ")
-        else:
-            compare_ticket_no = st.selectbox(
-                "เลือกลำดับที่ PM เพื่อเปรียบเทียบรูปภาพ/วิดีโอ:",
-                df_pm["ticket_no"].tolist(),
-                key="pm_compare_media_sel"
-            )
-            
-            if compare_ticket_no:
-                c_item = df_pm[df_pm["ticket_no"] == compare_ticket_no].iloc[0]
-                st.markdown(f"**ลำดับที่:** `{c_item.get('ticket_no')}` | **อุปกรณ์:** {c_item.get('equipment')} | **สถานะ:** {c_item.get('status')}")
-                
-                col_comp1, col_comp2 = st.columns(2)
-                with col_comp1:
-                    st.markdown("### 🔴 ก่อนทำ PM (Before Action)")
-                    display_media_gallery(c_item.get("image_before", ""), title="สื่อประกอบก่อนทำ PM")
-                with col_comp2:
-                    st.markdown("### 🟢 หลังทำ PM (After Action)")
-                    display_media_gallery(c_item.get("image_after", ""), title="สื่อประกอบหลังทำ PM")
-
-    # Sub-tab 3: สรุปประวัติงาน PM
-    with st_sub3:
-        st.markdown("#### 📜 ตารางสรุปผลงาน PM ทั้งหมด")
-        if df_pm.empty:
-            st.info("ยังไม่มีข้อมูลประวัติงาน PM")
-        else:
-            show_cols = ["ticket_no", "report_date", "department", "equipment", "detected_symptom", "technician", "solution", "completed_date", "status"]
-            df_pm_after_view = df_pm[show_cols].copy()
-            df_pm_after_view.columns = ["ลำดับที่", "วันที่ตรวจพบ", "แผนก", "อุปกรณ์", "อาการที่ตรวจพบ", "ช่างผู้ทำ", "ผลการทำ PM", "วันที่เสร็จ", "สถานะ"]
-            st.dataframe(apply_status_style(df_pm_after_view), use_container_width=True)
+                    st.markdown(f"**📋 รายละเอียดการตรวจเช็ก (Checklist):**\n```\n{desc_text}\n
