@@ -491,7 +491,6 @@ with tab2:
                 
                 display_media_gallery(ticket.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนซ่อมปัจจุบัน")
                 
-                # ใช้ dynamic key อิงตาม id ใบซ่อม
                 uploaded_media_b_new = st.file_uploader(
                     "📸/🎥 เปลี่ยน/อัปโหลดเพิ่ม รูปหรือวิดีโอก่อนซ่อม",
                     type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
@@ -554,7 +553,6 @@ with tab2:
                 
                 display_media_gallery(ticket.get("image_after", ""), title="📸/🎥 สื่อประกอบหลังซ่อมปัจจุบัน")
                 
-                # ใช้ dynamic key อิงตาม id ใบซ่อม
                 uploaded_media_a_new = st.file_uploader(
                     "📸/🎥 อัปโหลด/เปลี่ยน รูปหรือวิดีโอหลังซ่อมเสร็จ",
                     type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
@@ -857,9 +855,9 @@ with tab5:
         "📊 ตารางประวัติงาน PM ทั้งหมด"
     ])
 
-    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล
+    # Sub-tab 1: บันทึกผลการทำ PM และ แก้ไขข้อมูล (ปรับเพิ่มให้แสดงทั้งข้อมูลก่อนทำและหลังทำ)
     with st_sub1:
-        st.markdown("#### 🛠️ บันทึกผล / แก้ไขข้อมูลการดำเนินงาน PM (หลังทำ)")
+        st.markdown("#### 🛠️ บันทึกผล / แก้ไขข้อมูลการดำเนินงาน PM")
         
         if df_pm.empty:
             st.info("ยังไม่มีข้อมูลใบงาน PM ในระบบ")
@@ -884,14 +882,28 @@ with tab5:
                     f"📌 **ลำดับที่:** `{target_item.get('ticket_no')}` | "
                     f"**อุปกรณ์:** {target_item.get('equipment')} | "
                     f"**แผนก:** {target_item.get('department')} | "
-                    f"📅 **วันที่ตรวจพบ:** {det_date_val} {det_time_val} | "
                     f"**สถานะปัจจุบัน:** {status_color} {target_item.get('status')}"
                 )
+                
+                # --- ส่วนแสดงข้อมูลก่อนทำ PM (Before Action) ---
+                st.markdown("---")
+                st.markdown("### 🔴 1️⃣ ข้อมูลก่อนทำ PM (Before Action)")
+                col_b1, col_b2 = st.columns([1, 1])
+                with col_b1:
+                    st.markdown(f"**📅 วันที่ตรวจพบ:** {det_date_val} | **⏰ เวลาที่ตรวจพบ:** {det_time_val}")
+                    desc_text = target_item.get("description", "") or "ไม่มีการระบุรายละเอียด"
+                    st.markdown(f"**📋 รายละเอียดการตรวจเช็ก (Checklist):**\n```\n{desc_text}\n```")
+                with col_b2:
+                    display_media_gallery(target_item.get("image_before", ""), title="📸/🎥 สื่อประกอบก่อนทำ PM (Before)")
+                
+                # --- ส่วนฟอร์มบันทึกผลหลังทำ PM (After Action) ---
+                st.markdown("---")
+                st.markdown("### 🟢 2️⃣ บันทึก/แก้ไข ผลการดำเนินงาน PM (After Action)")
                 
                 now_dt_after = get_thailand_now_dt()
                 
                 with st.form(f"pm_after_form_{target_item['id']}"):
-                    st.markdown("🕒 **ข้อมูลวัน-เวลาการตรวจพบ และ วัน-เวลาทำเสร็จ**")
+                    st.markdown("🕒 **แก้ไขวัน-เวลาการตรวจพบ (หากต้องการ)**")
                     
                     col_det1, col_det2 = st.columns(2)
                     init_det_date = parse_date(target_item.get("report_date"), now_dt_after.date())
@@ -937,7 +949,6 @@ with tab5:
                     
                     display_media_gallery(target_item.get("image_after", ""), title="สื่อประกอบหลังทำปัจจุบัน")
                     
-                    # ใช้ dynamic key อิงตาม id ใบงาน PM
                     uploaded_pm_media_after = st.file_uploader(
                         "📸/🎥 เปลี่ยน/อัปโหลดเพิ่ม รูปถ่ายหรือวิดีโอผลงาน (หลังทำ PM)", 
                         type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "mkv"],
