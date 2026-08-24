@@ -1131,13 +1131,21 @@ with tab5:
                     st.markdown("### 🟢 หลังทำ PM (After Action)")
                     display_media_gallery(c_item.get("image_after", ""), title="สื่อประกอบหลังทำ PM")
 
-    # Sub-tab 3: สรุปประวัติงาน PM
+    # Sub-tab 3: สรุปประวัติงาน PM (เพิ่มคอลัมน์ อาการ/รายละเอียดก่อนทำ PM)
     with st_sub3:
         st.markdown("#### 📜 ตารางสรุปผลงาน PM ทั้งหมด")
         if df_pm.empty:
             st.info("ยังไม่มีข้อมูลประวัติงาน PM")
         else:
-            show_cols = ["ticket_no", "report_date", "department", "equipment", "detected_symptom", "technician", "solution", "completed_date", "status"]
+            show_cols = [
+                "ticket_no", "report_date", "department", "equipment", 
+                "description", "detected_symptom", "technician", 
+                "solution", "completed_date", "status"
+            ]
             df_pm_after_view = df_pm[show_cols].copy()
-            df_pm_after_view.columns = ["ลำดับที่", "วันที่ตรวจพบ", "แผนก", "อุปกรณ์", "อาการที่ตรวจพบ", "ช่างผู้ทำ", "ผลการทำ PM", "วันที่เสร็จ", "สถานะ"]
+            df_pm_after_view.columns = [
+                "ลำดับที่", "วันที่ตรวจพบ", "แผนก", "อุปกรณ์", 
+                "อาการ/รายละเอียดก่อนทำ PM", "อาการที่ตรวจพบ (ขณะทำ)", "ช่างผู้ทำ", 
+                "ผลการทำ PM", "วันที่เสร็จ", "สถานะ"
+            ]
             st.dataframe(apply_status_style(df_pm_after_view), use_container_width=True)
