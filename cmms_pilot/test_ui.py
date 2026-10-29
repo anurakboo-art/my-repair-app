@@ -8,6 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parent))
 from streamlit.testing.v1 import AppTest
 import backend
+PLAN={'id':'pm1','asset_id':'asset1','assignee_id':'tech1','task':'Test PM only','due_date':'2026-10-29','completed_at':None,'frequency':'daily','result':''}
 
 ASSET={'id':'asset1','code':'TEST-001','name':'Test machine','location':'Test area'}
 MEMBERS=[{'user_id':'admin1','display_name':'Test Admin','role':'admin','active':True},
@@ -26,7 +27,7 @@ current={'uid':'admin1'}
 def restore(*args): return API,SimpleNamespace(id=current['uid']),{'access_token':'fake','refresh_token':'fake'}
 def records(api,table,**filters):
     rows={'cmms_assets':[ASSET], 'cmms_jobs':[JOB], 'cmms_members':MEMBERS,
-          'cmms_pm':[], 'cmms_events':[{'created_at':'2026-10-29T00:00:00+00:00','actor_id':'tech1','action':'start','note':'Test note'}]}[table]
+          'cmms_pm':[PLAN], 'cmms_events':[{'created_at':'2026-10-29T00:00:00+00:00','actor_id':'tech1','action':'start','note':'Test note'}]}[table]
     return [r for r in rows if all(r.get(k)==v for k,v in filters.items())]
 def command(api,action,data):
     calls.append((action,data))
@@ -71,9 +72,17 @@ with patch.object(backend,'restore',restore),patch.object(backend,'records',reco
     assert not any('รหัสผู้ใช้' in x.label for x in app.text_input)
     for name in ('แผน PM','รายงาน'):
         page(app,name)
-    app=create('tech1');page(app,'งานซ่อม')
+    app=create('tech1')
+    assert app.session_state.main_page=='งานของฉัน'
+    element(app.button,'เปิดเพื่อเริ่มซ่อม').click().run();ok(app)
+    assert app.session_state.main_page=='งานซ่อม' and app.session_state.job_pick=='job1'
     assert any(b.label=='เริ่ม / กลับมาซ่อม' for b in app.button)
     assert not any(b.label=='มอบหมายช่าง' for b in app.button)
+    page(app,'งานของฉัน')
+    element(app.button,'PM วันนี้ / ค้าง (1)').click().run();ok(app)
+    element(app.button,'เปิดเพื่อบันทึกผล PM').click().run();ok(app)
+    assert app.session_state.main_page=='แผน PM' and app.session_state.pm_pick=='pm1'
+    assert not calls[-1][0]=='pm_complete'
     app=create('reporter1');page(app,'งานซ่อม')
     assert not any(b.label in ('เริ่ม / กลับมาซ่อม','มอบหมายช่าง') for b in app.button)
     assert 'จัดการผู้ใช้' not in element(app.radio,'เมนู').options
