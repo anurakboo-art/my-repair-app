@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 from backend import client, restore, command, records, upload_photo
+from task_queue import build_queues, queue_size, attention_count
 
 st.set_page_config(page_title='CMMS • ระบบนำร่อง', page_icon='🔧', layout='wide')
 st.markdown('''<style>
@@ -60,6 +61,16 @@ def go(page, job_id=None):
     st.session_state.pending_page = page
     if job_id:
         st.session_state.pending_job = job_id
+
+
+def go_queue(key):
+    go('งานของฉัน')
+    st.session_state.work_queue = key
+
+
+def go_pm(plan_id):
+    go('แผน PM')
+    st.session_state.pending_pm = plan_id
 
 
 def thai_date(value):
@@ -131,11 +142,13 @@ role = member['role']
 manager = role in ('manager','admin')
 st.sidebar.write(f"**{member['display_name']}** · {ROLES[role]}")
 st.caption(f"{member['display_name']} · {ROLES[role]}  |  {TODAY.strftime('%d/%m/%Y')}")
-pages = ['ภาพรวม','แจ้งซ่อม','งานซ่อม','ทะเบียนเครื่องจักร','แผน PM','รายงาน']
+pages = ['งานของฉัน','ภาพรวม','แจ้งซ่อม','งานซ่อม','ทะเบียนเครื่องจักร','แผน PM','รายงาน']
 if role == 'admin':
     pages.append('จัดการผู้ใช้')
 if 'pending_page' in st.session_state:
     st.session_state.main_page = st.session_state.pop('pending_page')
+if 'main_page' not in st.session_state:
+    st.session_state.main_page = 'งานของฉัน' if role == 'technician' else 'ภาพรวม'
 page = st.radio('เมนู',pages,horizontal=True,key='main_page',label_visibility='collapsed')
 st.divider()
 if st.sidebar.button('โหลดข้อมูลใหม่'):
@@ -155,12 +168,60 @@ asset_map = {a['id']:a for a in assets}
 techs = {m['user_id']:m['display_name'] for m in members if m['active'] and m['role']=='technician'}
 people = {m['user_id']:m['display_name'] for m in members}
 asset_label = lambda uid: f"{asset_map[uid]['code']} · {asset_map[uid]['name']}"
+queues = build_queues(role,user.id,jobs,plans,TODAY)
 
 def job_rows(items):
     return [{'เลขที่':f"WO-{j['number']:05d}",'เครื่องจักร':asset_label(j['asset_id']), 'อาการ':j['symptom'], 'สถานะ':STATES[j['status']], 'ความเร่งด่วน':PRIORITY[j['priority']], 'กำหนดเสร็จ':j['due_date'], 'เวลาซ่อม (นาที)':j['labor_minutes'], 'เครื่องหยุด (นาที)':j['downtime_minutes']} for j in items]
 
-if page == 'ภาพรวม':
+def queue_buttons(prefix):
+    columns = st.columns(min(3,len(queues)))
+    for index,queue in enumerate(queues):
+        columns[index % len(columns)].button(
+            f"{queue['title']} ({queue_size(queue)})",key=f"{prefix}_{queue['key']}",
+            type='primary' if page == 'งานของฉัน' and st.session_state.get('work_queue') == queue['key'] else 'secondary',
+            width='stretch',on_click=go_queue,args=(queue['key'],))
+
+
+if page == 'งานของฉัน':
+    st.subheader('งานของฉัน')
+    st.caption('เลือกกลุ่มงาน แล้วเปิดรายการเพื่อดำเนินการต่อ จำนวนคำนวณจากงานที่คุณมีสิทธิ์ดู')
+    st.metric('รอฉันทำ',attention_count(queues))
+    if st.session_state.get('work_queue') not in {q['key'] for q in queues}:
+        st.session_state.work_queue = next((q['key'] for q in queues if queue_size(q)),queues[0]['key'])
+    queue_buttons('mine')
+    selected_queue = next(q for q in queues if q['key']==st.session_state.work_queue)
+    st.markdown(f"### {selected_queue['title']}")
+    if not queue_size(selected_queue):
+        st.success('ไม่มีรายการในกลุ่มนี้')
+    for job in selected_queue['jobs']:
+        with st.container(border=True):
+            st.markdown(f"**WO-{job['number']:05d} · {asset_label(job['asset_id'])}**")
+            st.write(job['symptom'])
+            overdue = bool(job['due_date'] and job['due_date'] < TODAY.isoformat())
+            st.caption(f"{PRIORITY[job['priority']]} · {STATES[job['status']]} · กำหนด {thai_date(job['due_date'])}" + (' · เกินกำหนด' if overdue else ''))
+            action_labels = {'new':'เปิดเพื่อมอบหมาย','assigned':'เปิดเพื่อเริ่มซ่อม','repairing':'เปิดเพื่อบันทึกผลซ่อม','waiting_parts':'เปิดเพื่อติดตามอะไหล่','acceptance':'เปิดเพื่อตรวจรับ'}
+            if job['status']=='acceptance' and (manager or job['reporter_id']==user.id):
+                label = 'เปิดเพื่อตรวจรับ'
+            elif manager and job['status'] in ('new','assigned'):
+                label = 'เปิดเพื่อมอบหมาย'
+            elif role=='technician' and job['assignee_id']==user.id:
+                label = action_labels.get(job['status'],'ติดตามใบงาน')
+            else:
+                label = 'ติดตามใบงาน'
+            st.button(label,key=f"task_{job['id']}",width='stretch',on_click=go,args=('งานซ่อม',job['id']))
+    for plan in selected_queue['plans']:
+        with st.container(border=True):
+            st.markdown(f"**PM · {asset_label(plan['asset_id'])}**")
+            st.write(plan['task'])
+            st.caption(f"กำหนด {thai_date(plan['due_date'])} · {people.get(plan['assignee_id'],'ช่างผู้รับผิดชอบ')}" + (' · เกินกำหนด' if plan['due_date'] < TODAY.isoformat() else ' · วันนี้'))
+            st.button('เปิดเพื่อบันทึกผล PM' if role=='technician' and plan['assignee_id']==user.id else 'ติดตามแผน PM',key=f"task_pm_{plan['id']}",width='stretch',on_click=go_pm,args=(plan['id'],))
+    st.divider()
+    st.button('＋ แจ้งซ่อมใหม่',on_click=go,args=('แจ้งซ่อม',))
+
+elif page == 'ภาพรวม':
     st.subheader('วันนี้ต้องดูแลอะไรบ้าง')
+    st.markdown(f"**รอฉันทำ {attention_count(queues)} รายการ**")
+    queue_buttons('overview')
     active = [j for j in jobs if j['status'] not in ('closed','cancelled')]
     cols = st.columns(3)
     cols[0].metric('งานเปิดที่คุณเข้าถึงได้',len(active))
@@ -347,7 +408,13 @@ elif page == 'แผน PM':
         st.info('เพิ่มเครื่องจักรและบัญชีช่างก่อนสร้างแผน PM')
     pending = [p for p in plans if p['assignee_id']==user.id and not p['completed_at']]
     if role=='technician' and pending:
-        p = st.selectbox('บันทึกผล',pending,format_func=lambda p:p['task'])
+        pm_options = {p['id']:p for p in pending}
+        if 'pending_pm' in st.session_state:
+            st.session_state.pm_pick = st.session_state.pop('pending_pm')
+        if st.session_state.get('pm_pick') not in pm_options:
+            st.session_state.pm_pick = next(iter(pm_options))
+        pm_id = st.selectbox('บันทึกผล',list(pm_options),key='pm_pick',format_func=lambda uid:f"{asset_label(pm_options[uid]['asset_id'])} · {pm_options[uid]['task']}")
+        p = pm_options[pm_id]
         with st.form('pm_complete'):
             note = st.text_area('ผลตรวจ *')
             if st.form_submit_button('ยืนยันตรวจเสร็จ',type='primary',width='stretch'):
